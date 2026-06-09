@@ -89,13 +89,12 @@ if uploaded_file is not None:
         
         return trend
 
-    # Funkcja rysująca wykres grupowany dla jednego BU
+    # Funkcja rysująca wykres grupowany
     def draw_side_by_side_bar_chart(trend_data, title, is_cost=True):
         fig, ax = plt.subplots(figsize=(10, 3.5))
         x = np.arange(len(trend_data.index))
         width = 0.35
         
-        # Kolory zależnie od zakładki
         color_act = '#2b5c8f'
         color_bgt = '#e28743'
 
@@ -109,7 +108,6 @@ if uploaded_file is not None:
         ax.legend(fontsize=9)
         ax.grid(axis='y', linestyle='--', alpha=0.5)
         
-        # Opcjonalnie: ukrycie górnej i prawej ramki wykresu dla większej czytelności
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         
@@ -133,13 +131,12 @@ if uploaded_file is not None:
             st.divider()
             st.markdown("#### 📊 Miesięczna realizacja Kosztów (ACT vs BGT)")
             
-            # Generowanie wykresu jeden pod drugim dla każdego BU
             for bu in wybrane_bu:
                 df_bu_costs = df_costs[df_costs['BU PwC'] == bu]
                 trend_costs = get_monthly_trend(df_bu_costs, is_cost=True, max_month=miesiac)
                 
                 if not trend_costs.empty and (trend_costs.sum().sum() != 0):
-                    draw_side_by_side_bar_chart(trend_costs, title=f"KOSZTY: {bu}")
+                    draw_side_by_side_bar_chart(trend_costs, title=f"KOSZTY: {bu}", is_cost=True)
                 else:
                     st.info(f"Brak kosztów do wyświetlenia dla: {bu}")
         else:
@@ -159,7 +156,6 @@ if uploaded_file is not None:
             st.divider()
             st.markdown("#### 📊 Miesięczna realizacja Przychodów (ACT vs BGT)")
             
-            # Generowanie wykresu jeden pod drugim dla każdego BU
             for bu in wybrane_bu:
                 df_bu_rev = df_rev[df_rev['BU PwC'] == bu]
                 trend_rev = get_monthly_trend(df_bu_rev, is_cost=False, max_month=miesiac)
@@ -184,4 +180,11 @@ if uploaded_file is not None:
         df_deliv_rev = df_deliv[df_deliv['Mapping P&L Line - level 1'] == 'Total Revenue']
         
         c_res = calculate_ytd(df_deliv_costs, is_cost=True)
-        r_
+        r_res = calculate_ytd(df_deliv_rev, is_cost=False)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info("KOSZTY (YTD)")
+            st.dataframe(c_res.style.format({'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'Odchylenie': '{:,.0f}', '% Realizacji': '{:.1f}%'}))
+            
+            trend_deliv_
