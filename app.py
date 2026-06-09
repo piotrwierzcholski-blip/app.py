@@ -41,19 +41,29 @@ if uploaded_file is not None:
     
     st.sidebar.markdown("---")
     pokaz_yoy = st.sidebar.checkbox("📊 Pokaż porównanie z ubiegłym rokiem (YoY)", value=False)
+    podswietl_delivery = st.sidebar.checkbox("🎨 Wyróżnij jednostki Delivery (błękit)", value=False)
     st.sidebar.markdown("---")
     
     # Filtr BU
     lista_bu = sorted(df['BU PwC'].dropna().astype(str).unique())
     wybrane_bu = st.sidebar.multiselect("Filtruj po BU", options=lista_bu, default=lista_bu)
 
-    # Definicje linii P&L
+    # Definicje linii P&L i grupy Delivery
     cost_lines = [
         'Total Cost of Goods Sold', 'Total Cost of Sales & Marketing',
         'Cost of General Administration', 'Depreciation & Amortization', 'Holding Cost',
         'Cost of General Administration - Bonuses', 'Cost of General Administration - Change in reserves on bonuses'
     ]
     
+    target_bus = ['BU BSS Delivery', 'BU OSS Delivery', 'BU Cross Services Delivery', 'BU IA&A Delivery', 'BU Smart BSS/IoT Connect']
+    
+    # Funkcja do podświetlania wierszy Delivery
+    def highlight_delivery(row):
+        if row.name in target_bus or 'Delivery Communication' in str(row.name):
+            # Zwraca jasnobłękitne tło dla całego wiersza
+            return ['background-color: #e6f2ff'] * len(row)
+        return [''] * len(row)
+
     # Dane bieżące
     df_rok = df[df['Rok'] == rok]
     df_rok_filtered = df_rok[df_rok['BU PwC'].isin(wybrane_bu)]
@@ -98,7 +108,6 @@ if uploaded_file is not None:
             margin[f'Koszty {col}'] = res_costs[col] if col in res_costs.columns else 0
             margin[f'Przychody {col}'] = margin[f'Przychody {col}'].fillna(0)
             margin[f'Koszty {col}'] = margin[f'Koszty {col}'].fillna(0)
-            # Marża = Przychody - Koszty (koszty są u nas już dodatnie)
             margin[f'Marża {col}'] = margin[f'Przychody {col}'] - margin[f'Koszty {col}']
             margin[f'Marża % {col}'] = (margin[f'Marża {col}'] / margin[f'Przychody {col}'].replace(0, np.nan)) * 100
             
@@ -144,7 +153,7 @@ if uploaded_file is not None:
         
         color_act = '#2b5c8f'
         color_bgt = '#e28743'
-        color_ly = '#a5b1c2' # Szary dla LY
+        color_ly = '#a5b1c2'
 
         if pokaz_yoy:
             width = 0.25
@@ -186,7 +195,14 @@ if uploaded_file is not None:
             df_costs_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 1'].isin(cost_lines)]
             
             res_costs = calculate_ytd(df_costs, df_costs_ly, is_cost=True)
-            st.dataframe(res_costs[cols_std].style.format(format_std).background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn_r'), use_container_width=True)
+            
+            # Formatowanie i podświetlanie (Koszty)
+            style_c = res_costs[cols_std].style.format(format_std)
+            if podswietl_delivery:
+                style_c = style_c.apply(highlight_delivery, axis=1)
+            style_c = style_c.background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn_r')
+            
+            st.dataframe(style_c, use_container_width=True)
             
             st.divider()
             for bu in wybrane_bu:
@@ -206,7 +222,14 @@ if uploaded_file is not None:
             df_rev_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 1'] == 'Total Revenue']
             
             res_rev = calculate_ytd(df_rev, df_rev_ly, is_cost=False)
-            st.dataframe(res_rev[cols_std].style.format(format_std).background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn'), use_container_width=True)
+            
+            # Formatowanie i podświetlanie (Przychody)
+            style_r = res_rev[cols_std].style.format(format_std)
+            if podswietl_delivery:
+                style_r = style_r.apply(highlight_delivery, axis=1)
+            style_r = style_r.background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn')
+            
+            st.dataframe(style_r, use_container_width=True)
             
             st.divider()
             for bu in wybrane_bu:
@@ -236,15 +259,19 @@ if uploaded_file is not None:
                 'Odchylenie Marży do BGT': '{:,.0f}', 'Zmiana Marży YoY': '{:,.0f}'
             }
             
-            st.dataframe(margin_df[cols_margin].style.format(format_margin).background_gradient(subset=['Odchylenie Marży do BGT'], cmap='RdYlGn'), use_container_width=True)
+            # Formatowanie i podświetlanie (Zyskowność)
+            style_m = margin_df[cols_margin].style.format(format_margin)
+            if podswietl_delivery:
+                style_m = style_m.apply(highlight_delivery, axis=1)
+            style_m = style_m.background_gradient(subset=['Odchylenie Marży do BGT'], cmap='RdYlGn')
+            
+            st.dataframe(style_m, use_container_width=True)
         else:
             st.warning("Wybierz przynajmniej jedno BU z panelu po lewej stronie.")
 
     with tab4:
         st.subheader("Skonsolidowany wynik: Delivery Communication")
         st.caption("Uwaga: Ten widok to z góry zdefiniowana suma 5 jednostek Delivery.")
-        
-        target_bus = ['BU BSS Delivery', 'BU OSS Delivery', 'BU Cross Services Delivery', 'BU IA&A Delivery', 'BU Smart BSS/IoT Connect']
         
         df_deliv = df_rok[df_rok['BU PwC'].isin(target_bus)].copy()
         df_deliv['BU PwC'] = 'Delivery Communication (SUMA)'
@@ -262,14 +289,24 @@ if uploaded_file is not None:
         col1, col2 = st.columns(2)
         with col1:
             st.info("KOSZTY (YTD)")
-            st.dataframe(c_res[cols_std].style.format(format_std))
+            # Tutaj też podświetlamy błękitem, jeśli opcja jest zaznaczona
+            style_deliv_c = c_res[cols_std].style.format(format_std)
+            if podswietl_delivery:
+                style_deliv_c = style_deliv_c.apply(highlight_delivery, axis=1)
+            st.dataframe(style_deliv_c)
+            
             trend_deliv_costs = get_monthly_trend(df_deliv_costs, df_deliv_costs_ly, is_cost=True, max_month=miesiac)
             if not trend_deliv_costs.empty:
                  draw_side_by_side_bar_chart(trend_deliv_costs, title="KOSZTY: Delivery (Skonsolidowane)", is_cost=True)
                  
         with col2:
             st.success("PRZYCHODY (YTD)")
-            st.dataframe(r_res[cols_std].style.format(format_std))
+            # Tutaj też podświetlamy błękitem, jeśli opcja jest zaznaczona
+            style_deliv_r = r_res[cols_std].style.format(format_std)
+            if podswietl_delivery:
+                style_deliv_r = style_deliv_r.apply(highlight_delivery, axis=1)
+            st.dataframe(style_deliv_r)
+            
             trend_deliv_rev = get_monthly_trend(df_deliv_rev, df_deliv_rev_ly, is_cost=False, max_month=miesiac)
             if not trend_deliv_rev.empty:
                  draw_side_by_side_bar_chart(trend_deliv_rev, title="PRZYCHODY: Delivery (Skonsolidowane)", is_cost=False)
