@@ -1,3 +1,4 @@
+# --- POCZĄTEK KODU ---
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -187,4 +188,19 @@ if uploaded_file is not None:
             st.info("KOSZTY (YTD)")
             st.dataframe(c_res.style.format({'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'Odchylenie': '{:,.0f}', '% Realizacji': '{:.1f}%'}))
             
-            trend_deliv_
+            trend_deliv_costs = get_monthly_trend(df_deliv_costs, is_cost=True, max_month=miesiac)
+            if not trend_deliv_costs.empty:
+                 draw_side_by_side_bar_chart(trend_deliv_costs, title="KOSZTY: Delivery (Skonsolidowane)", is_cost=True)
+                 
+        with col2:
+            st.success("PRZYCHODY (YTD)")
+            st.dataframe(r_res.style.format({'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'Odchylenie': '{:,.0f}', '% Realizacji': '{:.1f}%'}))
+            
+            trend_deliv_rev = get_monthly_trend(df_deliv_rev, is_cost=False, max_month=miesiac)
+            if not trend_deliv_rev.empty:
+                 draw_side_by_side_bar_chart(trend_deliv_rev, title="PRZYCHODY: Delivery (Skonsolidowane)", is_cost=False)
+
+else:
+    st.info("Czekam na wgranie pliku w panelu bocznym po lewej stronie 👈")
+
+# --- KONIEC KODU ---
