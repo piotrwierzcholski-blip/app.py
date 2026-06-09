@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 # Konfiguracja wyglądu strony
 st.set_page_config(page_title="Raporty Finansowe BU", layout="wide")
@@ -65,34 +66,55 @@ if uploaded_file is not None:
         res['Odchylenie'] = res['YTD ACT'] - res['YTD BGT']
         return res.sort_values('YTD ACT', ascending=False)
 
-    # Nowa funkcja przygotowująca dane miesięczne do wykresu
     def get_monthly_trend(data_subset, is_cost=False, max_month=12):
         df_trend = data_subset[data_subset['Miesiąc'] <= max_month]
         if df_trend.empty:
             return pd.DataFrame()
         
-        # Grupujemy po miesiącach i rodzaju danych (ACT/BGT)
         trend = df_trend.groupby(['Miesiąc', 'Rodzaj danych'])['Sum of Wartość'].sum().unstack(fill_value=0)
         
         if is_cost:
             trend = trend * -1
             
-        # Zabezpieczenie na wypadek braku którejś kolumny w danych
         for col in ['ACT', 'BGT']:
             if col not in trend.columns:
                 trend[col] = 0
                 
-        # Konwersja na miliony PLN i zmiana nazw kolumn pod legendę wykresu
         trend = trend / 1e6 
         trend = trend[['ACT', 'BGT']]
-        trend.columns = ['Wykonanie (ACT)', 'Budżet (BGT)']
         
-        # Tłumaczenie numerów miesięcy na przyjazne etykiety
-        miesiące_nazwy = {1: '1. Sty', 2: '2. Lut', 3: '3. Mar', 4: '4. Kwi', 5: '5. Maj', 6: '6. Cze', 
-                          7: '7. Lip', 8: '8. Sie', 9: '9. Wrz', 10: '10. Paź', 11: '11. Lis', 12: '12. Gru'}
+        miesiące_nazwy = {1: 'Sty', 2: 'Lut', 3: 'Mar', 4: 'Kwi', 5: 'Maj', 6: 'Cze', 
+                          7: 'Lip', 8: 'Sie', 9: 'Wrz', 10: 'Paź', 11: 'Lis', 12: 'Gru'}
         trend.index = trend.index.map(miesiące_nazwy)
         
         return trend
+
+    # Funkcja rysująca wykres grupowany dla jednego BU
+    def draw_side_by_side_bar_chart(trend_data, title, is_cost=True):
+        fig, ax = plt.subplots(figsize=(10, 3.5))
+        x = np.arange(len(trend_data.index))
+        width = 0.35
+        
+        # Kolory zależnie od zakładki
+        color_act = '#2b5c8f'
+        color_bgt = '#e28743'
+
+        ax.bar(x - width/2, trend_data['ACT'], width, label='Wykonanie (ACT)', color=color_act)
+        ax.bar(x + width/2, trend_data['BGT'], width, label='Budżet (BGT)', color=color_bgt)
+        
+        ax.set_ylabel('mln PLN', fontsize=9)
+        ax.set_title(title, fontsize=11, fontweight='bold', color='#1a365d')
+        ax.set_xticks(x)
+        ax.set_xticklabels(trend_data.index, fontsize=9)
+        ax.legend(fontsize=9)
+        ax.grid(axis='y', linestyle='--', alpha=0.5)
+        
+        # Opcjonalnie: ukrycie górnej i prawej ramki wykresu dla większej czytelności
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        plt.tight_layout()
+        st.pyplot(fig)
 
     # Tworzymy 3 zakładki w aplikacji
     tab1, tab2, tab3 = st.tabs(["📉 Koszty", "📈 Przychody", "🚀 Delivery Communication"])
@@ -108,14 +130,18 @@ if uploaded_file is not None:
                 'Odchylenie': '{:,.0f} PLN', '% Realizacji': '{:.1f}%'
             }).background_gradient(subset=['Odchylenie'], cmap='RdYlGn_r'), use_container_width=True)
             
-            # --- DODANY WYKRES ---
-            st.markdown("#### 📊 Miesięczny trend realizacji kosztów (w mln PLN)")
-            trend_costs = get_monthly_trend(df_costs, is_cost=True, max_month=miesiac)
-            if not trend_costs.empty:
-                # Automatyczny zgrupowany wykres słupkowy w Streamlit
-                st.bar_chart(trend_costs)
-            else:
-                st.info("Brak danych do wyświetlenia na wykresie.")
+            st.divider()
+            st.markdown("#### 📊 Miesięczna realizacja Kosztów (ACT vs BGT)")
+            
+            # Generowanie wykresu jeden pod drugim dla każdego BU
+            for bu in wybrane_bu:
+                df_bu_costs = df_costs[df_costs['BU PwC'] == bu]
+                trend_costs = get_monthly_trend(df_bu_costs, is_cost=True, max_month=miesiac)
+                
+                if not trend_costs.empty and (trend_costs.sum().sum() != 0):
+                    draw_side_by_side_bar_chart(trend_costs, title=f"KOSZTY: {bu}")
+                else:
+                    st.info(f"Brak kosztów do wyświetlenia dla: {bu}")
         else:
             st.warning("Wybierz przynajmniej jedno BU z panelu po lewej stronie.")
 
@@ -130,13 +156,18 @@ if uploaded_file is not None:
                 'Odchylenie': '{:,.0f} PLN', '% Realizacji': '{:.1f}%'
             }).background_gradient(subset=['Odchylenie'], cmap='RdYlGn'), use_container_width=True)
             
-            # --- DODANY WYKRES ---
-            st.markdown("#### 📊 Miesięczny trend realizacji przychodów (w mln PLN)")
-            trend_rev = get_monthly_trend(df_rev, is_cost=False, max_month=miesiac)
-            if not trend_rev.empty:
-                st.bar_chart(trend_rev)
-            else:
-                st.info("Brak danych do wyświetlenia na wykresie.")
+            st.divider()
+            st.markdown("#### 📊 Miesięczna realizacja Przychodów (ACT vs BGT)")
+            
+            # Generowanie wykresu jeden pod drugim dla każdego BU
+            for bu in wybrane_bu:
+                df_bu_rev = df_rev[df_rev['BU PwC'] == bu]
+                trend_rev = get_monthly_trend(df_bu_rev, is_cost=False, max_month=miesiac)
+                
+                if not trend_rev.empty and (trend_rev.sum().sum() != 0):
+                    draw_side_by_side_bar_chart(trend_rev, title=f"PRZYCHODY: {bu}", is_cost=False)
+                else:
+                    st.info(f"Brak przychodów do wyświetlenia dla: {bu}")
         else:
             st.warning("Wybierz przynajmniej jedno BU z panelu po lewej stronie.")
 
@@ -153,15 +184,4 @@ if uploaded_file is not None:
         df_deliv_rev = df_deliv[df_deliv['Mapping P&L Line - level 1'] == 'Total Revenue']
         
         c_res = calculate_ytd(df_deliv_costs, is_cost=True)
-        r_res = calculate_ytd(df_deliv_rev, is_cost=False)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.info("KOSZTY")
-            st.dataframe(c_res.style.format({'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'Odchylenie': '{:,.0f}', '% Realizacji': '{:.1f}%'}))
-        with col2:
-            st.success("PRZYCHODY")
-            st.dataframe(r_res.style.format({'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'Odchylenie': '{:,.0f}', '% Realizacji': '{:.1f}%'}))
-
-else:
-    st.info("Czekam na wgranie pliku w panelu bocznym po lewej stronie 👈")
+        r_
