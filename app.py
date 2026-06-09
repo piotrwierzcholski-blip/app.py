@@ -42,6 +42,7 @@ if uploaded_file is not None:
     st.sidebar.markdown("---")
     pokaz_yoy = st.sidebar.checkbox("📊 Pokaż porównanie z ubiegłym rokiem (YoY)", value=False)
     podswietl_delivery = st.sidebar.checkbox("🎨 Wyróżnij jednostki Delivery (błękit)", value=False)
+    wykresy_narastajaco = st.sidebar.checkbox("📈 Wykresy narastająco (Kumulacja YTD)", value=True)
     st.sidebar.markdown("---")
     
     # Filtr BU
@@ -57,10 +58,8 @@ if uploaded_file is not None:
     
     target_bus = ['BU BSS Delivery', 'BU OSS Delivery', 'BU Cross Services Delivery', 'BU IA&A Delivery', 'BU Smart BSS/IoT Connect']
     
-    # Funkcja do podświetlania wierszy Delivery
     def highlight_delivery(row):
         if row.name in target_bus or 'Delivery Communication' in str(row.name):
-            # Zwraca jasnobłękitne tło dla całego wiersza
             return ['background-color: #e6f2ff'] * len(row)
         return [''] * len(row)
 
@@ -141,6 +140,10 @@ if uploaded_file is not None:
         all_months = list(range(1, max_month + 1))
         trend = trend.reindex(all_months).fillna(0)
         
+        # --- ZMIANA: Obliczanie wartości skumulowanych ---
+        if wykresy_narastajaco:
+            trend = trend.cumsum()
+        
         miesiące_nazwy = {1: 'Sty', 2: 'Lut', 3: 'Mar', 4: 'Kwi', 5: 'Maj', 6: 'Cze', 
                           7: 'Lip', 8: 'Sie', 9: 'Wrz', 10: 'Paź', 11: 'Lis', 12: 'Gru'}
         trend.index = trend.index.map(miesiące_nazwy)
@@ -166,7 +169,9 @@ if uploaded_file is not None:
             ax.bar(x + width/2, trend_data['BGT'], width, label='Budżet (BGT)', color=color_bgt)
         
         ax.set_ylabel('mln PLN', fontsize=9)
-        ax.set_title(title, fontsize=11, fontweight='bold', color='#1a365d')
+        # Dodajemy informację do tytułu wykresu, jeśli są to wartości narastające
+        tytul_wykresu = f"{title} (Skumulowane YTD)" if wykresy_narastajaco else title
+        ax.set_title(tytul_wykresu, fontsize=11, fontweight='bold', color='#1a365d')
         ax.set_xticks(x)
         ax.set_xticklabels(trend_data.index, fontsize=9)
         ax.legend(fontsize=9)
@@ -180,7 +185,6 @@ if uploaded_file is not None:
     # Tworzymy 4 zakładki w aplikacji
     tab1, tab2, tab3, tab4 = st.tabs(["📉 Koszty", "📈 Przychody", "💰 Zyskowność", "🚀 Delivery Communication"])
 
-    # Definicja stylów kolumn dla tabel
     if pokaz_yoy:
         cols_std = ['YTD ACT', 'YTD BGT', '% Realizacji BGT', 'Odchylenie do BGT', 'YTD LY', 'Zmiana kwotowa YoY', 'Dynamika YoY (%)']
         format_std = {'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'YTD LY': '{:,.0f}', 'Odchylenie do BGT': '{:,.0f}', 'Zmiana kwotowa YoY': '{:,.0f}', '% Realizacji BGT': '{:.1f}%', 'Dynamika YoY (%)': '{:.1f}%'}
@@ -196,7 +200,6 @@ if uploaded_file is not None:
             
             res_costs = calculate_ytd(df_costs, df_costs_ly, is_cost=True)
             
-            # Formatowanie i podświetlanie (Koszty)
             style_c = res_costs[cols_std].style.format(format_std)
             if podswietl_delivery:
                 style_c = style_c.apply(highlight_delivery, axis=1)
@@ -223,7 +226,6 @@ if uploaded_file is not None:
             
             res_rev = calculate_ytd(df_rev, df_rev_ly, is_cost=False)
             
-            # Formatowanie i podświetlanie (Przychody)
             style_r = res_rev[cols_std].style.format(format_std)
             if podswietl_delivery:
                 style_r = style_r.apply(highlight_delivery, axis=1)
@@ -259,7 +261,6 @@ if uploaded_file is not None:
                 'Odchylenie Marży do BGT': '{:,.0f}', 'Zmiana Marży YoY': '{:,.0f}'
             }
             
-            # Formatowanie i podświetlanie (Zyskowność)
             style_m = margin_df[cols_margin].style.format(format_margin)
             if podswietl_delivery:
                 style_m = style_m.apply(highlight_delivery, axis=1)
@@ -289,7 +290,6 @@ if uploaded_file is not None:
         col1, col2 = st.columns(2)
         with col1:
             st.info("KOSZTY (YTD)")
-            # Tutaj też podświetlamy błękitem, jeśli opcja jest zaznaczona
             style_deliv_c = c_res[cols_std].style.format(format_std)
             if podswietl_delivery:
                 style_deliv_c = style_deliv_c.apply(highlight_delivery, axis=1)
@@ -301,7 +301,6 @@ if uploaded_file is not None:
                  
         with col2:
             st.success("PRZYCHODY (YTD)")
-            # Tutaj też podświetlamy błękitem, jeśli opcja jest zaznaczona
             style_deliv_r = r_res[cols_std].style.format(format_std)
             if podswietl_delivery:
                 style_deliv_r = style_deliv_r.apply(highlight_delivery, axis=1)
