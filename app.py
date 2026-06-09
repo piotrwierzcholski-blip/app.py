@@ -15,10 +15,26 @@ uploaded_file = st.sidebar.file_uploader("Wgraj plik ze 'Stosem danych' (CSV/XLS
 if uploaded_file is not None:
     # Wczytywanie danych
     with st.spinner("Przetwarzanie danych..."):
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file)
+        try:
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file)
+            else:
+                # Sprawdzamy czy plik Excel ma zakładkę 'Stos danych'
+                xl = pd.ExcelFile(uploaded_file)
+                if 'Stos danych' in xl.sheet_names:
+                    df = pd.read_excel(uploaded_file, sheet_name='Stos danych')
+                else:
+                    # Jeśli nie ma takiej nazwy, wczytaj pierwszą stronę
+                    df = pd.read_excel(uploaded_file)
+            
+            # Dodatkowe zabezpieczenie: sprawdzenie czy mamy kolumnę "Rok"
+            if 'Rok' not in df.columns:
+                st.error("Błąd: Wgrany plik lub zakładka nie zawiera kolumny 'Rok'. Upewnij się, że wgrywasz zakładkę 'Stos danych'.")
+                st.stop()
+                
+        except Exception as e:
+            st.error(f"Wystąpił błąd przy wczytywaniu pliku: {e}")
+            st.stop()
             
     # Filtry w pasku bocznym
     lata = df['Rok'].dropna().astype(int).unique()
