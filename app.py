@@ -116,7 +116,7 @@ if uploaded_file is not None:
         st.pyplot(fig)
 
     # Tworzymy 3 zakładki w aplikacji
-    tab1, tab2, tab3 = st.tabs(["📉 Koszty", "📈 Przychody", "🚀 Delivery Communication"])
+    tab1, tab2, tab3 = st.tabs(["📉 Koszty", "📈 Przychody", "🚀 Delivery Communications"])
 
     with tab1:
         st.subheader(f"Wydatki Kosztowe (YTD do miesiąca {miesiac})")
@@ -169,13 +169,13 @@ if uploaded_file is not None:
             st.warning("Wybierz przynajmniej jedno BU z panelu po lewej stronie.")
 
     with tab3:
-        st.subheader("Skonsolidowany wynik: Delivery Communication")
+        st.subheader("Skonsolidowany wynik: Delivery Communications")
         st.caption("Uwaga: Ten widok to z góry zdefiniowana suma 5 jednostek Delivery, globalny filtr BU go nie zmienia.")
         
         target_bus = ['BU BSS Delivery', 'BU OSS Delivery', 'BU Cross Services Delivery', 'BU IA&A Delivery', 'BU Smart BSS/IoT Connect']
         
         df_deliv = df_rok[df_rok['BU PwC'].isin(target_bus)].copy()
-        df_deliv['BU PwC'] = 'Delivery Communication (SUMA)'
+        df_deliv['BU PwC'] = 'Delivery Communications (SUMA)'
         
         df_deliv_costs = df_deliv[df_deliv['Mapping P&L Line - level 1'].isin(cost_lines)]
         df_deliv_rev = df_deliv[df_deliv['Mapping P&L Line - level 1'] == 'Total Revenue']
