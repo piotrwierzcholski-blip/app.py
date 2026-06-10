@@ -56,6 +56,9 @@ if uploaded_file is not None:
         'Cost of General Administration - Bonuses', 'Cost of General Administration - Change in reserves on bonuses'
     ]
     
+    # Wzorzec do filtrowania samych wynagrodzeń na poziomie 2
+    salary_pattern = 'Salaries|Bonuses|vacation'
+    
     target_bus = ['BU BSS Delivery', 'BU OSS Delivery', 'BU Cross Services Delivery', 'BU IA&A Delivery', 'BU Smart BSS/IoT Connect']
     
     def highlight_delivery(row):
@@ -140,7 +143,6 @@ if uploaded_file is not None:
         all_months = list(range(1, max_month + 1))
         trend = trend.reindex(all_months).fillna(0)
         
-        # --- ZMIANA: Obliczanie wartości skumulowanych ---
         if wykresy_narastajaco:
             trend = trend.cumsum()
         
@@ -169,7 +171,6 @@ if uploaded_file is not None:
             ax.bar(x + width/2, trend_data['BGT'], width, label='Budżet (BGT)', color=color_bgt)
         
         ax.set_ylabel('mln PLN', fontsize=9)
-        # Dodajemy informację do tytułu wykresu, jeśli są to wartości narastające
         tytul_wykresu = f"{title} (Skumulowane YTD)" if wykresy_narastajaco else title
         ax.set_title(tytul_wykresu, fontsize=11, fontweight='bold', color='#1a365d')
         ax.set_xticks(x)
@@ -193,7 +194,7 @@ if uploaded_file is not None:
         format_std = {'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'Odchylenie do BGT': '{:,.0f}', '% Realizacji BGT': '{:.1f}%'}
 
     with tab1:
-        st.subheader(f"Wydatki Kosztowe (YTD do miesiąca {miesiac})")
+        st.subheader(f"Wydatki Kosztowe - CAŁOŚĆ (YTD do miesiąca {miesiac})")
         if wybrane_bu:
             df_costs = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 1'].isin(cost_lines)]
             df_costs_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 1'].isin(cost_lines)]
@@ -206,6 +207,21 @@ if uploaded_file is not None:
             style_c = style_c.background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn_r')
             
             st.dataframe(style_c, use_container_width=True)
+            
+            # --- DODATEK: KOSZTY WYNAGRODZEŃ ---
+            with st.expander("👀 Pokaż szczegóły: Koszty samych wypłat i premii (Wynagrodzenia)"):
+                df_payroll = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 2'].str.contains(salary_pattern, case=False, na=False)]
+                df_payroll_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 2'].str.contains(salary_pattern, case=False, na=False)]
+                
+                res_payroll = calculate_ytd(df_payroll, df_payroll_ly, is_cost=True)
+                if not res_payroll.empty:
+                    style_p = res_payroll[cols_std].style.format(format_std)
+                    if podswietl_delivery:
+                        style_p = style_p.apply(highlight_delivery, axis=1)
+                    style_p = style_p.background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn_r')
+                    st.dataframe(style_p, use_container_width=True)
+                else:
+                    st.info("Brak kosztów wynagrodzeń w wybranych jednostkach.")
             
             st.divider()
             for bu in wybrane_bu:
@@ -294,6 +310,14 @@ if uploaded_file is not None:
             if podswietl_delivery:
                 style_deliv_c = style_deliv_c.apply(highlight_delivery, axis=1)
             st.dataframe(style_deliv_c)
+            
+            # Dodatek: Payroll dla Delivery
+            with st.expander("👀 Pokaż szczegóły: Koszty samych wypłat i premii"):
+                df_deliv_payroll = df_deliv[df_deliv['Mapping P&L Line - level 2'].str.contains(salary_pattern, case=False, na=False)]
+                df_deliv_payroll_ly = df_deliv_ly[df_deliv_ly['Mapping P&L Line - level 2'].str.contains(salary_pattern, case=False, na=False)]
+                res_deliv_payroll = calculate_ytd(df_deliv_payroll, df_deliv_payroll_ly, is_cost=True)
+                if not res_deliv_payroll.empty:
+                    st.dataframe(res_deliv_payroll[cols_std].style.format(format_std).background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn_r'))
             
             trend_deliv_costs = get_monthly_trend(df_deliv_costs, df_deliv_costs_ly, is_cost=True, max_month=miesiac)
             if not trend_deliv_costs.empty:
