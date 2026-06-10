@@ -49,7 +49,7 @@ if uploaded_file is not None:
     lista_bu = sorted(df['BU PwC'].dropna().astype(str).unique())
     wybrane_bu = st.sidebar.multiselect("Filtruj po BU", options=lista_bu, default=lista_bu)
 
-    # Definicje linii P&L i grupy Delivery
+    # POPRAWIONA (PIERWOTNA) LISTA KOSZTÓW
     cost_lines = [
         'Total Cost of Goods Sold', 
         'Total Cost of Sales & Marketing',
@@ -58,14 +58,9 @@ if uploaded_file is not None:
         'Holding Cost',
         'Cost of General Administration - Bonuses', 
         'Cost of General Administration - Change in reserves on bonuses',
-        'Cost of General Administration - Pension provision and vacation accrual',
-        'One - offs',
-        'Miscellaneous',
-        'Margin ICT allocation',
-        'FX Hedge reversal'
+        'Cost of General Administration - Pension provision and vacation accrual'
     ]
     
-    # Wzorzec do filtrowania samych wynagrodzeń na poziomie 2
     salary_pattern = 'Salaries|Bonuses|vacation'
     
     target_bus = ['BU BSS Delivery', 'BU OSS Delivery', 'BU Cross Services Delivery', 'BU IA&A Delivery', 'BU Smart BSS/IoT Connect']
@@ -217,7 +212,6 @@ if uploaded_file is not None:
             
             st.dataframe(style_c, use_container_width=True)
             
-            # --- DODATEK: KOSZTY WYNAGRODZEŃ ---
             with st.expander("👀 Pokaż szczegóły: Koszty samych wypłat i premii (Wynagrodzenia)"):
                 df_payroll = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 2'].str.contains(salary_pattern, case=False, na=False)]
                 df_payroll_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 2'].str.contains(salary_pattern, case=False, na=False)]
@@ -320,7 +314,6 @@ if uploaded_file is not None:
                 style_deliv_c = style_deliv_c.apply(highlight_delivery, axis=1)
             st.dataframe(style_deliv_c)
             
-            # Dodatek: Payroll dla Delivery
             with st.expander("👀 Pokaż szczegóły: Koszty samych wypłat i premii"):
                 df_deliv_payroll = df_deliv[df_deliv['Mapping P&L Line - level 2'].str.contains(salary_pattern, case=False, na=False)]
                 df_deliv_payroll_ly = df_deliv_ly[df_deliv_ly['Mapping P&L Line - level 2'].str.contains(salary_pattern, case=False, na=False)]
