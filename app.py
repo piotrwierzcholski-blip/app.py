@@ -51,9 +51,18 @@ if uploaded_file is not None:
 
     # Definicje linii P&L i grupy Delivery
     cost_lines = [
-        'Total Cost of Goods Sold', 'Total Cost of Sales & Marketing',
-        'Cost of General Administration', 'Depreciation & Amortization', 'Holding Cost',
-        'Cost of General Administration - Bonuses', 'Cost of General Administration - Change in reserves on bonuses'
+        'Total Cost of Goods Sold', 
+        'Total Cost of Sales & Marketing',
+        'Cost of General Administration', 
+        'Depreciation & Amortization', 
+        'Holding Cost',
+        'Cost of General Administration - Bonuses', 
+        'Cost of General Administration - Change in reserves on bonuses',
+        'Cost of General Administration - Pension provision and vacation accrual',
+        'One - offs',
+        'Miscellaneous',
+        'Margin ICT allocation',
+        'FX Hedge reversal'
     ]
     
     # Wzorzec do filtrowania samych wynagrodzeń na poziomie 2
