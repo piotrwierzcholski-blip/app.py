@@ -161,7 +161,6 @@ if uploaded_file is not None:
         
         return trend
 
-    # Zaktualizowana funkcja do rysowania wykresów - wspiera zapis do PDF
     def draw_side_by_side_bar_chart(trend_data, title, is_cost=True, return_fig=False):
         fig, ax = plt.subplots(figsize=(10, 3.5))
         x = np.arange(len(trend_data.index))
@@ -197,7 +196,7 @@ if uploaded_file is not None:
             st.pyplot(fig)
             plt.close(fig)
 
-    # --- NOWE FUNKCJE DO GENEROWANIA PDF ---
+    # --- FUNKCJE DO GENEROWANIA PDF ---
     def format_df_for_pdf(df, format_dict):
         df_pdf = df.copy()
         for col, f_str in format_dict.items():
@@ -220,11 +219,9 @@ if uploaded_file is not None:
                 cell.set_facecolor('#2b5c8f')
         return fig
 
-    # --- GENERATOR PDF ---
     def generate_pdf_report():
         pdf_buffer = io.BytesIO()
         with PdfPages(pdf_buffer) as pdf:
-            # DANE GŁÓWNE
             df_costs = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 1'].isin(cost_lines)]
             df_costs_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 1'].isin(cost_lines)]
             res_costs = calculate_ytd(df_costs, df_costs_ly, is_cost=True)
@@ -235,13 +232,12 @@ if uploaded_file is not None:
             
             margin_df = calculate_margin(df_rok_filtered, df_ly_filtered)
 
-            # TAB 1: KOSZTY
+            # TAB 1
             if not res_costs.empty:
                 df_pdf_c = format_df_for_pdf(res_costs[cols_std], format_std)
                 fig_tc = plot_dataframe_to_fig(df_pdf_c, f"1. WYDATKI KOSZTOWE - CAŁOŚĆ (YTD do miesiąca {miesiac})")
                 pdf.savefig(fig_tc, bbox_inches='tight')
                 plt.close(fig_tc)
-                
                 for bu in wybrane_bu:
                     df_bu_costs = df_costs[df_costs['BU PwC'] == bu]
                     df_bu_costs_ly = df_costs_ly[df_costs_ly['BU PwC'] == bu]
@@ -251,13 +247,12 @@ if uploaded_file is not None:
                         pdf.savefig(fig_chart_c, bbox_inches='tight')
                         plt.close(fig_chart_c)
 
-            # TAB 2: PRZYCHODY
+            # TAB 2
             if not res_rev.empty:
                 df_pdf_r = format_df_for_pdf(res_rev[cols_std], format_std)
                 fig_tr = plot_dataframe_to_fig(df_pdf_r, f"2. WYKONANIE PRZYCHODÓW (YTD do miesiąca {miesiac})")
                 pdf.savefig(fig_tr, bbox_inches='tight')
                 plt.close(fig_tr)
-                
                 for bu in wybrane_bu:
                     df_bu_rev = df_rev[df_rev['BU PwC'] == bu]
                     df_bu_rev_ly = df_rev_ly[df_rev_ly['BU PwC'] == bu]
@@ -267,7 +262,7 @@ if uploaded_file is not None:
                         pdf.savefig(fig_chart_r, bbox_inches='tight')
                         plt.close(fig_chart_r)
 
-            # TAB 3: ZYSKOWNOŚĆ
+            # TAB 3
             if not margin_df.empty:
                 df_pdf_m = format_df_for_pdf(margin_df[cols_margin], format_margin)
                 fig_tm = plot_dataframe_to_fig(df_pdf_m, f"3. ZYSKOWNOŚĆ / MARŻA (YTD do miesiąca {miesiac})")
@@ -276,7 +271,7 @@ if uploaded_file is not None:
 
         return pdf_buffer.getvalue()
 
-    # Formaty i kolumny
+    # Formaty
     if pokaz_yoy:
         cols_std = ['YTD ACT', 'YTD BGT', '% Realizacji BGT', 'Odchylenie do BGT', 'YTD LY', 'Zmiana kwotowa YoY', 'Dynamika YoY (%)']
         format_std = {'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'YTD LY': '{:,.0f}', 'Odchylenie do BGT': '{:,.0f}', 'Zmiana kwotowa YoY': '{:,.0f}', '% Realizacji BGT': '{:.1f}%', 'Dynamika YoY (%)': '{:.1f}%'}
@@ -293,11 +288,10 @@ if uploaded_file is not None:
         'Odchylenie Marży do BGT': '{:,.0f}', 'Zmiana Marży YoY': '{:,.0f}'
     }
 
-    # PRZYCISK DO POBIERANIA PDF W PASKU BOCZNYM
+    # PRZYCISK PDF
     st.sidebar.markdown("---")
     st.sidebar.subheader("📄 Eksport Danych")
     if wybrane_bu:
-        # Przycisk typu Download
         pdf_bytes = generate_pdf_report()
         st.sidebar.download_button(
             label="📥 Pobierz Raport PDF (Tabs 1-3)",
@@ -308,7 +302,7 @@ if uploaded_file is not None:
     else:
         st.sidebar.info("Wybierz jednostki BU, aby pobrać raport.")
 
-    # Tworzymy 4 zakładki w aplikacji
+    # Zakładki
     tab1, tab2, tab3, tab4 = st.tabs(["📉 Koszty", "📈 Przychody", "💰 Zyskowność", "🚀 Delivery Communication"])
 
     with tab1:
@@ -318,18 +312,15 @@ if uploaded_file is not None:
             df_costs_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 1'].isin(cost_lines)]
             
             res_costs = calculate_ytd(df_costs, df_costs_ly, is_cost=True)
-            
             style_c = res_costs[cols_std].style.format(format_std)
             if podswietl_delivery:
                 style_c = style_c.apply(highlight_delivery, axis=1)
             style_c = style_c.background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn_r')
-            
             st.dataframe(style_c, use_container_width=True)
             
             with st.expander("👀 Pokaż szczegóły: Compensation COGS"):
                 df_payroll = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
                 df_payroll_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
-                
                 res_payroll = calculate_ytd(df_payroll, df_payroll_ly, is_cost=True)
                 if not res_payroll.empty:
                     style_p = res_payroll[cols_std].style.format(format_std)
@@ -337,15 +328,12 @@ if uploaded_file is not None:
                         style_p = style_p.apply(highlight_delivery, axis=1)
                     style_p = style_p.background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn_r')
                     st.dataframe(style_p, use_container_width=True)
-                else:
-                    st.info("Brak kosztów Compensation COGS w wybranych jednostkach.")
             
             st.divider()
             for bu in wybrane_bu:
                 df_bu_costs = df_costs[df_costs['BU PwC'] == bu]
                 df_bu_costs_ly = df_costs_ly[df_costs_ly['BU PwC'] == bu]
                 trend_costs = get_monthly_trend(df_bu_costs, df_bu_costs_ly, is_cost=True, max_month=miesiac)
-                
                 if not trend_costs.empty and (trend_costs.sum().sum() != 0):
                     draw_side_by_side_bar_chart(trend_costs, title=f"KOSZTY: {bu}", is_cost=True)
         else:
@@ -358,12 +346,10 @@ if uploaded_file is not None:
             df_rev_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 1'] == 'Total Revenue']
             
             res_rev = calculate_ytd(df_rev, df_rev_ly, is_cost=False)
-            
             style_r = res_rev[cols_std].style.format(format_std)
             if podswietl_delivery:
                 style_r = style_r.apply(highlight_delivery, axis=1)
             style_r = style_r.background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn')
-            
             st.dataframe(style_r, use_container_width=True)
             
             st.divider()
@@ -371,7 +357,6 @@ if uploaded_file is not None:
                 df_bu_rev = df_rev[df_rev['BU PwC'] == bu]
                 df_bu_rev_ly = df_rev_ly[df_rev_ly['BU PwC'] == bu]
                 trend_rev = get_monthly_trend(df_bu_rev, df_bu_rev_ly, is_cost=False, max_month=miesiac)
-                
                 if not trend_rev.empty and (trend_rev.sum().sum() != 0):
                     draw_side_by_side_bar_chart(trend_rev, title=f"PRZYCHODY: {bu}", is_cost=False)
         else:
@@ -381,12 +366,10 @@ if uploaded_file is not None:
         st.subheader(f"Kalkulacja Zyskowności / Marży (YTD do miesiąca {miesiac})")
         if wybrane_bu:
             margin_df = calculate_margin(df_rok_filtered, df_ly_filtered)
-            
             style_m = margin_df[cols_margin].style.format(format_margin)
             if podswietl_delivery:
                 style_m = style_m.apply(highlight_delivery, axis=1)
             style_m = style_m.background_gradient(subset=['Odchylenie Marży do BGT'], cmap='RdYlGn')
-            
             st.dataframe(style_m, use_container_width=True)
         else:
             st.warning("Wybierz przynajmniej jedno BU z panelu po lewej stronie.")
@@ -426,7 +409,18 @@ if uploaded_file is not None:
             trend_deliv_costs = get_monthly_trend(df_deliv_costs, df_deliv_costs_ly, is_cost=True, max_month=miesiac)
             if not trend_deliv_costs.empty:
                  draw_side_by_side_bar_chart(trend_deliv_costs, title="KOSZTY: Delivery (Skonsolidowane)", is_cost=True)
-                 
+            
+            # --- NOWOŚĆ: Wykres G&A 12-miesięczny ---
+            st.divider()
+            ga_lines = [l for l in cost_lines if 'Cost of General Administration' in l]
+            df_deliv_ga = df_deliv_costs[df_deliv_costs['Mapping P&L Line - level 1'].isin(ga_lines)]
+            df_deliv_ga_ly = df_deliv_costs_ly[df_deliv_costs_ly['Mapping P&L Line - level 1'].isin(ga_lines)]
+            
+            # Wymuszamy max_month=12, by zobaczyć trend dla pełnego roku
+            trend_deliv_ga = get_monthly_trend(df_deliv_ga, df_deliv_ga_ly, is_cost=True, max_month=12)
+            if not trend_deliv_ga.empty:
+                 draw_side_by_side_bar_chart(trend_deliv_ga, title="KOSZTY ZARZĄDU (G&A): Delivery (Cały rok)", is_cost=True)
+
         with col2:
             st.success("PRZYCHODY (YTD)")
             style_deliv_r = r_res[cols_std].style.format(format_std)
