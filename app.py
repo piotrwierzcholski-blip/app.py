@@ -49,19 +49,21 @@ if uploaded_file is not None:
     lista_bu = sorted(df['BU PwC'].dropna().astype(str).unique())
     wybrane_bu = st.sidebar.multiselect("Filtruj po BU", options=lista_bu, default=lista_bu)
 
-     # LISTA KOSZTÓW (Poziom operacyjny / EBITDA)
+    # LISTA KOSZTÓW GŁÓWNYCH (EBITDA - bez D&A i Holding)
     cost_lines = [
         'Total Cost of Goods Sold', 
         'Total Cost of Sales & Marketing',
         'Cost of General Administration', 
-        # Usunięto 'Depreciation & Amortization'
-        # Usunięto 'Holding Cost'
         'Cost of General Administration - Bonuses', 
         'Cost of General Administration - Change in reserves on bonuses',
         'Cost of General Administration - Pension provision and vacation accrual'
     ]
     
-    salary_pattern = 'Salaries|Bonuses|vacation'
+    # PRECYZYJNA LISTA COMPENSATION COGS (Level 2)
+    cogs_comp_lines = [
+        'Cost of Goods Sold - Salaries & Social Security Tax',
+        'Cost of Goods Sold - Bonuses'
+    ]
     
     target_bus = ['BU BSS Delivery', 'BU OSS Delivery', 'BU Cross Services Delivery', 'BU IA&A Delivery', 'BU Smart BSS/IoT Connect']
     
@@ -212,9 +214,10 @@ if uploaded_file is not None:
             
             st.dataframe(style_c, use_container_width=True)
             
-            with st.expander("👀 Pokaż szczegóły: Koszty samych wypłat i premii (Wynagrodzenia)"):
-                df_payroll = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 2'].str.contains(salary_pattern, case=False, na=False)]
-                df_payroll_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 2'].str.contains(salary_pattern, case=False, na=False)]
+            # --- ZMIANA: Tylko Compensation COGS ---
+            with st.expander("👀 Pokaż szczegóły: Compensation COGS"):
+                df_payroll = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
+                df_payroll_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
                 
                 res_payroll = calculate_ytd(df_payroll, df_payroll_ly, is_cost=True)
                 if not res_payroll.empty:
@@ -224,7 +227,7 @@ if uploaded_file is not None:
                     style_p = style_p.background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn_r')
                     st.dataframe(style_p, use_container_width=True)
                 else:
-                    st.info("Brak kosztów wynagrodzeń w wybranych jednostkach.")
+                    st.info("Brak kosztów Compensation COGS w wybranych jednostkach.")
             
             st.divider()
             for bu in wybrane_bu:
@@ -314,9 +317,10 @@ if uploaded_file is not None:
                 style_deliv_c = style_deliv_c.apply(highlight_delivery, axis=1)
             st.dataframe(style_deliv_c)
             
-            with st.expander("👀 Pokaż szczegóły: Koszty samych wypłat i premii"):
-                df_deliv_payroll = df_deliv[df_deliv['Mapping P&L Line - level 2'].str.contains(salary_pattern, case=False, na=False)]
-                df_deliv_payroll_ly = df_deliv_ly[df_deliv_ly['Mapping P&L Line - level 2'].str.contains(salary_pattern, case=False, na=False)]
+            # --- ZMIANA: Tylko Compensation COGS ---
+            with st.expander("👀 Pokaż szczegóły: Compensation COGS"):
+                df_deliv_payroll = df_deliv[df_deliv['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
+                df_deliv_payroll_ly = df_deliv_ly[df_deliv_ly['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
                 res_deliv_payroll = calculate_ytd(df_deliv_payroll, df_deliv_payroll_ly, is_cost=True)
                 if not res_deliv_payroll.empty:
                     st.dataframe(res_deliv_payroll[cols_std].style.format(format_std).background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn_r'))
