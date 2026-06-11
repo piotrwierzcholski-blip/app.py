@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import plotly.express as px
+import io
+from matplotlib.backends.backend_pdf import PdfPages
 
 # Konfiguracja wyglądu strony
 st.set_page_config(page_title="Raporty Finansowe BU", layout="wide")
@@ -50,7 +52,7 @@ if uploaded_file is not None:
     lista_bu = sorted(df['BU PwC'].dropna().astype(str).unique())
     wybrane_bu = st.sidebar.multiselect("Filtruj po BU", options=lista_bu, default=lista_bu)
 
-    # LISTA KOSZTÓW GŁÓWNYCH (EBITDA - bez D&A i Holding)
+    # LISTA KOSZTÓW GŁÓWNYCH (EBITDA)
     cost_lines = [
         'Total Cost of Goods Sold', 
         'Total Cost of Sales & Marketing',
@@ -60,7 +62,7 @@ if uploaded_file is not None:
         'Cost of General Administration - Pension provision and vacation accrual'
     ]
     
-    # PRECYZYJNA LISTA COMPENSATION COGS (Level 2)
+    # LISTA COMPENSATION COGS (Level 2)
     cogs_comp_lines = [
         'Cost of Goods Sold - Salaries & Social Security Tax',
         'Cost of Goods Sold - Bonuses'
@@ -159,7 +161,8 @@ if uploaded_file is not None:
         
         return trend
 
-    def draw_side_by_side_bar_chart(trend_data, title, is_cost=True):
+    # Zaktualizowana funkcja do rysowania wykresów - wspiera zapis do PDF
+    def draw_side_by_side_bar_chart(trend_data, title, is_cost=True, return_fig=False):
         fig, ax = plt.subplots(figsize=(10, 3.5))
         x = np.arange(len(trend_data.index))
         
@@ -188,17 +191,125 @@ if uploaded_file is not None:
         ax.spines['right'].set_visible(False)
         
         plt.tight_layout()
-        st.pyplot(fig)
+        if return_fig:
+            return fig
+        else:
+            st.pyplot(fig)
+            plt.close(fig)
 
-    # Tworzymy 4 zakładki w aplikacji
-    tab1, tab2, tab3, tab4 = st.tabs(["📉 Koszty", "📈 Przychody", "💰 Zyskowność", "🚀 Delivery Communication"])
+    # --- NOWE FUNKCJE DO GENEROWANIA PDF ---
+    def format_df_for_pdf(df, format_dict):
+        df_pdf = df.copy()
+        for col, f_str in format_dict.items():
+            if col in df_pdf.columns:
+                df_pdf[col] = df_pdf[col].apply(lambda x: f_str.format(x) if pd.notnull(x) else "")
+        return df_pdf.reset_index()
 
+    def plot_dataframe_to_fig(df, title):
+        fig, ax = plt.subplots(figsize=(12, max(2, len(df) * 0.5)))
+        ax.axis('tight')
+        ax.axis('off')
+        ax.set_title(title, fontsize=14, fontweight='bold', pad=20, color='#1a365d')
+        table = ax.table(cellText=df.values, colLabels=df.columns, loc='center', cellLoc='center')
+        table.auto_set_font_size(False)
+        table.set_fontsize(8)
+        table.scale(1, 1.8)
+        for (row, col), cell in table.get_celld().items():
+            if row == 0:
+                cell.set_text_props(weight='bold', color='white')
+                cell.set_facecolor('#2b5c8f')
+        return fig
+
+    # --- GENERATOR PDF ---
+    def generate_pdf_report():
+        pdf_buffer = io.BytesIO()
+        with PdfPages(pdf_buffer) as pdf:
+            # DANE GŁÓWNE
+            df_costs = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 1'].isin(cost_lines)]
+            df_costs_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 1'].isin(cost_lines)]
+            res_costs = calculate_ytd(df_costs, df_costs_ly, is_cost=True)
+            
+            df_rev = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 1'] == 'Total Revenue']
+            df_rev_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 1'] == 'Total Revenue']
+            res_rev = calculate_ytd(df_rev, df_rev_ly, is_cost=False)
+            
+            margin_df = calculate_margin(df_rok_filtered, df_ly_filtered)
+
+            # TAB 1: KOSZTY
+            if not res_costs.empty:
+                df_pdf_c = format_df_for_pdf(res_costs[cols_std], format_std)
+                fig_tc = plot_dataframe_to_fig(df_pdf_c, f"1. WYDATKI KOSZTOWE - CAŁOŚĆ (YTD do miesiąca {miesiac})")
+                pdf.savefig(fig_tc, bbox_inches='tight')
+                plt.close(fig_tc)
+                
+                for bu in wybrane_bu:
+                    df_bu_costs = df_costs[df_costs['BU PwC'] == bu]
+                    df_bu_costs_ly = df_costs_ly[df_costs_ly['BU PwC'] == bu]
+                    trend_costs = get_monthly_trend(df_bu_costs, df_bu_costs_ly, is_cost=True, max_month=miesiac)
+                    if not trend_costs.empty and (trend_costs.sum().sum() != 0):
+                        fig_chart_c = draw_side_by_side_bar_chart(trend_costs, f"KOSZTY: {bu}", is_cost=True, return_fig=True)
+                        pdf.savefig(fig_chart_c, bbox_inches='tight')
+                        plt.close(fig_chart_c)
+
+            # TAB 2: PRZYCHODY
+            if not res_rev.empty:
+                df_pdf_r = format_df_for_pdf(res_rev[cols_std], format_std)
+                fig_tr = plot_dataframe_to_fig(df_pdf_r, f"2. WYKONANIE PRZYCHODÓW (YTD do miesiąca {miesiac})")
+                pdf.savefig(fig_tr, bbox_inches='tight')
+                plt.close(fig_tr)
+                
+                for bu in wybrane_bu:
+                    df_bu_rev = df_rev[df_rev['BU PwC'] == bu]
+                    df_bu_rev_ly = df_rev_ly[df_rev_ly['BU PwC'] == bu]
+                    trend_rev = get_monthly_trend(df_bu_rev, df_bu_rev_ly, is_cost=False, max_month=miesiac)
+                    if not trend_rev.empty and (trend_rev.sum().sum() != 0):
+                        fig_chart_r = draw_side_by_side_bar_chart(trend_rev, f"PRZYCHODY: {bu}", is_cost=False, return_fig=True)
+                        pdf.savefig(fig_chart_r, bbox_inches='tight')
+                        plt.close(fig_chart_r)
+
+            # TAB 3: ZYSKOWNOŚĆ
+            if not margin_df.empty:
+                df_pdf_m = format_df_for_pdf(margin_df[cols_margin], format_margin)
+                fig_tm = plot_dataframe_to_fig(df_pdf_m, f"3. ZYSKOWNOŚĆ / MARŻA (YTD do miesiąca {miesiac})")
+                pdf.savefig(fig_tm, bbox_inches='tight')
+                plt.close(fig_tm)
+
+        return pdf_buffer.getvalue()
+
+    # Formaty i kolumny
     if pokaz_yoy:
         cols_std = ['YTD ACT', 'YTD BGT', '% Realizacji BGT', 'Odchylenie do BGT', 'YTD LY', 'Zmiana kwotowa YoY', 'Dynamika YoY (%)']
         format_std = {'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'YTD LY': '{:,.0f}', 'Odchylenie do BGT': '{:,.0f}', 'Zmiana kwotowa YoY': '{:,.0f}', '% Realizacji BGT': '{:.1f}%', 'Dynamika YoY (%)': '{:.1f}%'}
+        cols_margin = ['Przychody YTD ACT', 'Koszty YTD ACT', 'Marża YTD ACT', 'Marża YTD BGT', 'Marża YTD LY', 'Marża % YTD ACT', 'Marża % YTD BGT', 'Marża % YTD LY', 'Odchylenie Marży do BGT', 'Zmiana Marży YoY']
     else:
         cols_std = ['YTD ACT', 'YTD BGT', '% Realizacji BGT', 'Odchylenie do BGT']
         format_std = {'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'Odchylenie do BGT': '{:,.0f}', '% Realizacji BGT': '{:.1f}%'}
+        cols_margin = ['Przychody YTD ACT', 'Koszty YTD ACT', 'Marża YTD ACT', 'Marża YTD BGT', 'Marża % YTD ACT', 'Marża % YTD BGT', 'Odchylenie Marży do BGT']
+        
+    format_margin = {
+        'Przychody YTD ACT': '{:,.0f}', 'Koszty YTD ACT': '{:,.0f}',
+        'Marża YTD ACT': '{:,.0f}', 'Marża YTD BGT': '{:,.0f}', 'Marża YTD LY': '{:,.0f}',
+        'Marża % YTD ACT': '{:.1f}%', 'Marża % YTD BGT': '{:.1f}%', 'Marża % YTD LY': '{:.1f}%',
+        'Odchylenie Marży do BGT': '{:,.0f}', 'Zmiana Marży YoY': '{:,.0f}'
+    }
+
+    # PRZYCISK DO POBIERANIA PDF W PASKU BOCZNYM
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📄 Eksport Danych")
+    if wybrane_bu:
+        # Przycisk typu Download
+        pdf_bytes = generate_pdf_report()
+        st.sidebar.download_button(
+            label="📥 Pobierz Raport PDF (Tabs 1-3)",
+            data=pdf_bytes,
+            file_name=f"Raport_BU_do_Miesiaca_{miesiac}.pdf",
+            mime="application/pdf"
+        )
+    else:
+        st.sidebar.info("Wybierz jednostki BU, aby pobrać raport.")
+
+    # Tworzymy 4 zakładki w aplikacji
+    tab1, tab2, tab3, tab4 = st.tabs(["📉 Koszty", "📈 Przychody", "💰 Zyskowność", "🚀 Delivery Communication"])
 
     with tab1:
         st.subheader(f"Wydatki Kosztowe - CAŁOŚĆ (YTD do miesiąca {miesiac})")
@@ -271,18 +382,6 @@ if uploaded_file is not None:
         if wybrane_bu:
             margin_df = calculate_margin(df_rok_filtered, df_ly_filtered)
             
-            if pokaz_yoy:
-                cols_margin = ['Przychody YTD ACT', 'Koszty YTD ACT', 'Marża YTD ACT', 'Marża YTD BGT', 'Marża YTD LY', 'Marża % YTD ACT', 'Marża % YTD BGT', 'Marża % YTD LY', 'Odchylenie Marży do BGT', 'Zmiana Marży YoY']
-            else:
-                cols_margin = ['Przychody YTD ACT', 'Koszty YTD ACT', 'Marża YTD ACT', 'Marża YTD BGT', 'Marża % YTD ACT', 'Marża % YTD BGT', 'Odchylenie Marży do BGT']
-                
-            format_margin = {
-                'Przychody YTD ACT': '{:,.0f}', 'Koszty YTD ACT': '{:,.0f}',
-                'Marża YTD ACT': '{:,.0f}', 'Marża YTD BGT': '{:,.0f}', 'Marża YTD LY': '{:,.0f}',
-                'Marża % YTD ACT': '{:.1f}%', 'Marża % YTD BGT': '{:.1f}%', 'Marża % YTD LY': '{:.1f}%',
-                'Odchylenie Marży do BGT': '{:,.0f}', 'Zmiana Marży YoY': '{:,.0f}'
-            }
-            
             style_m = margin_df[cols_margin].style.format(format_margin)
             if podswietl_delivery:
                 style_m = style_m.apply(highlight_delivery, axis=1)
@@ -339,15 +438,12 @@ if uploaded_file is not None:
             if not trend_deliv_rev.empty:
                  draw_side_by_side_bar_chart(trend_deliv_rev, title="PRZYCHODY: Delivery (Skonsolidowane)", is_cost=False)
                  
-        # --- ZMIANA: INTERAKTYWNE WYKRESY KOŁOWE (PLOTLY) ---
         st.divider()
         st.subheader("Struktura P&L dla grupy Delivery (YTD Wykonanie)")
         
         col_pie1, col_pie2 = st.columns(2)
         
-        # Obliczenia do wykresu kołowego KOSZTÓW
         df_deliv_costs_act = df_deliv_costs[(df_deliv_costs['Miesiąc'] <= miesiac) & (df_deliv_costs['Rodzaj danych'] == 'ACT')].copy()
-        
         def group_cost_line(line):
             if 'Goods Sold' in line: return 'Koszty Bezpośrednie (COGS)'
             elif 'Sales & Marketing' in line: return 'Koszty Sprzedaży (S&M)'
@@ -357,7 +453,6 @@ if uploaded_file is not None:
         pie_costs_data = df_deliv_costs_act.groupby('Grupa Kosztowa')['Sum of Wartość'].sum() * -1
         pie_costs_data = pie_costs_data[pie_costs_data > 0].reset_index()
         
-        # Obliczenia do wykresu kołowego PRZYCHODÓW (z poziomu 2)
         df_deliv_rev_act = df_deliv_rev[(df_deliv_rev['Miesiąc'] <= miesiac) & (df_deliv_rev['Rodzaj danych'] == 'ACT')].copy()
         pie_rev_data = df_deliv_rev_act.groupby('Mapping P&L Line - level 2')['Sum of Wartość'].sum().reset_index()
         pie_rev_data = pie_rev_data[pie_rev_data['Sum of Wartość'] > 0]
@@ -367,11 +462,8 @@ if uploaded_file is not None:
                 fig_c = px.pie(pie_costs_data, values='Sum of Wartość', names='Grupa Kosztowa', 
                                title='Struktura Kosztów (COGS vs S&M vs G&A)', hole=0.4,
                                color_discrete_sequence=px.colors.sequential.Blues_r)
-                
                 fig_c.update_traces(textposition='inside', textinfo='percent+label',
                                     hovertemplate='<b>%{label}</b><br>Wartość: %{value:,.0f} PLN<br>Udział: %{percent}<extra></extra>')
-                
-                # Przeniesienie legendy na dół, aby wykres był większy
                 fig_c.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
                 st.plotly_chart(fig_c, use_container_width=True)
 
@@ -380,11 +472,8 @@ if uploaded_file is not None:
                 fig_r = px.pie(pie_rev_data, values='Sum of Wartość', names='Mapping P&L Line - level 2', 
                                title='Struktura Przychodów (Kategorie Level 2)', hole=0.4,
                                color_discrete_sequence=px.colors.sequential.Greens_r)
-                
                 fig_r.update_traces(textposition='inside', textinfo='percent+label',
                                     hovertemplate='<b>%{label}</b><br>Wartość: %{value:,.0f} PLN<br>Udział: %{percent}<extra></extra>')
-                
-                # Przeniesienie legendy na dół
                 fig_r.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
                 st.plotly_chart(fig_r, use_container_width=True)
 
