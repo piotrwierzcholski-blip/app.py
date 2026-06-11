@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import plotly.express as px
 
 # Konfiguracja wyglądu strony
 st.set_page_config(page_title="Raporty Finansowe BU", layout="wide")
@@ -214,7 +215,6 @@ if uploaded_file is not None:
             
             st.dataframe(style_c, use_container_width=True)
             
-            # --- ZMIANA: Tylko Compensation COGS ---
             with st.expander("👀 Pokaż szczegóły: Compensation COGS"):
                 df_payroll = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
                 df_payroll_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
@@ -317,7 +317,6 @@ if uploaded_file is not None:
                 style_deliv_c = style_deliv_c.apply(highlight_delivery, axis=1)
             st.dataframe(style_deliv_c)
             
-            # --- ZMIANA: Tylko Compensation COGS ---
             with st.expander("👀 Pokaż szczegóły: Compensation COGS"):
                 df_deliv_payroll = df_deliv[df_deliv['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
                 df_deliv_payroll_ly = df_deliv_ly[df_deliv_ly['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
@@ -339,6 +338,55 @@ if uploaded_file is not None:
             trend_deliv_rev = get_monthly_trend(df_deliv_rev, df_deliv_rev_ly, is_cost=False, max_month=miesiac)
             if not trend_deliv_rev.empty:
                  draw_side_by_side_bar_chart(trend_deliv_rev, title="PRZYCHODY: Delivery (Skonsolidowane)", is_cost=False)
+                 
+        # --- ZMIANA: INTERAKTYWNE WYKRESY KOŁOWE (PLOTLY) ---
+        st.divider()
+        st.subheader("Struktura P&L dla grupy Delivery (YTD Wykonanie)")
+        
+        col_pie1, col_pie2 = st.columns(2)
+        
+        # Obliczenia do wykresu kołowego KOSZTÓW
+        df_deliv_costs_act = df_deliv_costs[(df_deliv_costs['Miesiąc'] <= miesiac) & (df_deliv_costs['Rodzaj danych'] == 'ACT')].copy()
+        
+        def group_cost_line(line):
+            if 'Goods Sold' in line: return 'Koszty Bezpośrednie (COGS)'
+            elif 'Sales & Marketing' in line: return 'Koszty Sprzedaży (S&M)'
+            else: return 'Koszty Zarządu (G&A)'
+            
+        df_deliv_costs_act['Grupa Kosztowa'] = df_deliv_costs_act['Mapping P&L Line - level 1'].apply(group_cost_line)
+        pie_costs_data = df_deliv_costs_act.groupby('Grupa Kosztowa')['Sum of Wartość'].sum() * -1
+        pie_costs_data = pie_costs_data[pie_costs_data > 0].reset_index()
+        
+        # Obliczenia do wykresu kołowego PRZYCHODÓW (z poziomu 2)
+        df_deliv_rev_act = df_deliv_rev[(df_deliv_rev['Miesiąc'] <= miesiac) & (df_deliv_rev['Rodzaj danych'] == 'ACT')].copy()
+        pie_rev_data = df_deliv_rev_act.groupby('Mapping P&L Line - level 2')['Sum of Wartość'].sum().reset_index()
+        pie_rev_data = pie_rev_data[pie_rev_data['Sum of Wartość'] > 0]
+
+        with col_pie1:
+            if not pie_costs_data.empty:
+                fig_c = px.pie(pie_costs_data, values='Sum of Wartość', names='Grupa Kosztowa', 
+                               title='Struktura Kosztów (COGS vs S&M vs G&A)', hole=0.4,
+                               color_discrete_sequence=px.colors.sequential.Blues_r)
+                
+                fig_c.update_traces(textposition='inside', textinfo='percent+label',
+                                    hovertemplate='<b>%{label}</b><br>Wartość: %{value:,.0f} PLN<br>Udział: %{percent}<extra></extra>')
+                
+                # Przeniesienie legendy na dół, aby wykres był większy
+                fig_c.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
+                st.plotly_chart(fig_c, use_container_width=True)
+
+        with col_pie2:
+            if not pie_rev_data.empty:
+                fig_r = px.pie(pie_rev_data, values='Sum of Wartość', names='Mapping P&L Line - level 2', 
+                               title='Struktura Przychodów (Kategorie Level 2)', hole=0.4,
+                               color_discrete_sequence=px.colors.sequential.Greens_r)
+                
+                fig_r.update_traces(textposition='inside', textinfo='percent+label',
+                                    hovertemplate='<b>%{label}</b><br>Wartość: %{value:,.0f} PLN<br>Udział: %{percent}<extra></extra>')
+                
+                # Przeniesienie legendy na dół
+                fig_r.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
+                st.plotly_chart(fig_r, use_container_width=True)
 
 else:
     st.info("Czekam na wgranie pliku w panelu bocznym po lewej stronie 👈")
