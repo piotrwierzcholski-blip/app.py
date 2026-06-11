@@ -128,7 +128,6 @@ if uploaded_file is not None:
         
         return margin
 
-    # ZMIANA: Dodano argument 'force_non_cumulative'
     def get_monthly_trend(data_subset, data_ly_subset, is_cost=False, max_month=12, force_non_cumulative=False):
         df_trend = data_subset[data_subset['Miesiąc'] <= max_month]
         df_trend_ly = data_ly_subset[data_ly_subset['Miesiąc'] <= max_month]
@@ -153,7 +152,6 @@ if uploaded_file is not None:
         all_months = list(range(1, max_month + 1))
         trend = trend.reindex(all_months).fillna(0)
         
-        # Omiń sumowanie, jeśli wymuszamy widok miesiąc w miesiąc
         if wykresy_narastajaco and not force_non_cumulative:
             trend = trend.cumsum()
         
@@ -163,7 +161,6 @@ if uploaded_file is not None:
         
         return trend
 
-    # ZMIANA: Dodano argument 'force_non_cumulative' do nazwy
     def draw_side_by_side_bar_chart(trend_data, title, is_cost=True, return_fig=False, force_non_cumulative=False):
         fig, ax = plt.subplots(figsize=(10, 3.5))
         x = np.arange(len(trend_data.index))
@@ -183,7 +180,6 @@ if uploaded_file is not None:
             ax.bar(x + width/2, trend_data['BGT'], width, label='Budżet (BGT)', color=color_bgt)
         
         ax.set_ylabel('mln PLN', fontsize=9)
-        # Nie dodawaj "Skumulowane YTD", jeśli wymusiliśmy widok miesięczny
         tytul_wykresu = f"{title} (Skumulowane YTD)" if (wykresy_narastajaco and not force_non_cumulative) else title
         ax.set_title(tytul_wykresu, fontsize=11, fontweight='bold', color='#1a365d')
         ax.set_xticks(x)
@@ -413,16 +409,6 @@ if uploaded_file is not None:
             trend_deliv_costs = get_monthly_trend(df_deliv_costs, df_deliv_costs_ly, is_cost=True, max_month=miesiac)
             if not trend_deliv_costs.empty:
                  draw_side_by_side_bar_chart(trend_deliv_costs, title="KOSZTY: Delivery (Skonsolidowane)", is_cost=True)
-            
-            st.divider()
-            ga_lines = [l for l in cost_lines if 'Cost of General Administration' in l]
-            df_deliv_ga = df_deliv_costs[df_deliv_costs['Mapping P&L Line - level 1'].isin(ga_lines)]
-            df_deliv_ga_ly = df_deliv_costs_ly[df_deliv_costs_ly['Mapping P&L Line - level 1'].isin(ga_lines)]
-            
-            # ZMIANA: Przekazanie flagi 'force_non_cumulative=True'
-            trend_deliv_ga = get_monthly_trend(df_deliv_ga, df_deliv_ga_ly, is_cost=True, max_month=12, force_non_cumulative=True)
-            if not trend_deliv_ga.empty:
-                 draw_side_by_side_bar_chart(trend_deliv_ga, title="KOSZTY ZARZĄDU (G&A): Miesiąc w miesiąc", is_cost=True, force_non_cumulative=True)
 
         with col2:
             st.success("PRZYCHODY (YTD)")
