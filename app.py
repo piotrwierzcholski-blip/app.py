@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import plotly.express as px
 import io
+import zipfile
 from matplotlib.backends.backend_pdf import PdfPages
 
 # Konfiguracja wyglądu strony
@@ -196,13 +197,12 @@ if uploaded_file is not None:
             st.pyplot(fig)
             plt.close(fig)
 
-    # Funkcja przypisująca Level 1 do odpowiedniej "Tarczy" kosztów
     def group_cost_line(line):
         if 'Goods Sold' in line: return 'Koszty Bezpośrednie (COGS)'
         elif 'Sales & Marketing' in line: return 'Koszty Sprzedaży (S&M)'
         else: return 'Koszty Zarządu (G&A)'
 
-    # --- FUNKCJE DO GENEROWANIA PDF ---
+    # --- ZAKTUALIZOWANA FUNKCJA GENERUJĄCA PDF DLA KONKRETNEJ LISTY BU ---
     def format_df_for_pdf(df, format_dict):
         df_pdf = df.copy()
         for col, f_str in format_dict.items():
@@ -225,26 +225,31 @@ if uploaded_file is not None:
                 cell.set_facecolor('#2b5c8f')
         return fig
 
-    def generate_pdf_report():
+    def generate_pdf_report(bu_list):
         pdf_buffer = io.BytesIO()
         with PdfPages(pdf_buffer) as pdf:
-            df_costs = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 1'].isin(cost_lines)]
-            df_costs_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 1'].isin(cost_lines)]
+            # Filtrowanie danych tylko do podanej listy BU
+            df_costs = df_rok[df_rok['BU PwC'].isin(bu_list) & df_rok['Mapping P&L Line - level 1'].isin(cost_lines)]
+            df_costs_ly = df_ly[df_ly['BU PwC'].isin(bu_list) & df_ly['Mapping P&L Line - level 1'].isin(cost_lines)]
             res_costs = calculate_ytd(df_costs, df_costs_ly, is_cost=True)
             
-            df_rev = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 1'] == 'Total Revenue']
-            df_rev_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 1'] == 'Total Revenue']
+            df_rev = df_rok[df_rok['BU PwC'].isin(bu_list) & (df_rok['Mapping P&L Line - level 1'] == 'Total Revenue')]
+            df_rev_ly = df_ly[df_ly['BU PwC'].isin(bu_list) & (df_ly['Mapping P&L Line - level 1'] == 'Total Revenue')]
             res_rev = calculate_ytd(df_rev, df_rev_ly, is_cost=False)
             
-            margin_df = calculate_margin(df_rok_filtered, df_ly_filtered)
+            df_rok_bu = df_rok[df_rok['BU PwC'].isin(bu_list)]
+            df_ly_bu = df_ly[df_ly['BU PwC'].isin(bu_list)]
+            margin_df = calculate_margin(df_rok_bu, df_ly_bu)
+
+            title_prefix = bu_list[0] if len(bu_list) == 1 else "WYBRANE JEDNOSTKI"
 
             # TAB 1
             if not res_costs.empty:
                 df_pdf_c = format_df_for_pdf(res_costs[cols_std], format_std)
-                fig_tc = plot_dataframe_to_fig(df_pdf_c, f"1. WYDATKI KOSZTOWE - CAŁOŚĆ (YTD do miesiąca {miesiac})")
+                fig_tc = plot_dataframe_to_fig(df_pdf_c, f"1. {title_prefix} - KOSZTY CAŁOŚĆ (YTD do m-ca {miesiac})")
                 pdf.savefig(fig_tc, bbox_inches='tight')
                 plt.close(fig_tc)
-                for bu in wybrane_bu:
+                for bu in bu_list:
                     df_bu_costs = df_costs[df_costs['BU PwC'] == bu]
                     df_bu_costs_ly = df_costs_ly[df_costs_ly['BU PwC'] == bu]
                     trend_costs = get_monthly_trend(df_bu_costs, df_bu_costs_ly, is_cost=True, max_month=miesiac)
@@ -256,10 +261,10 @@ if uploaded_file is not None:
             # TAB 2
             if not res_rev.empty:
                 df_pdf_r = format_df_for_pdf(res_rev[cols_std], format_std)
-                fig_tr = plot_dataframe_to_fig(df_pdf_r, f"2. WYKONANIE PRZYCHODÓW (YTD do miesiąca {miesiac})")
+                fig_tr = plot_dataframe_to_fig(df_pdf_r, f"2. {title_prefix} - PRZYCHODY (YTD do m-ca {miesiac})")
                 pdf.savefig(fig_tr, bbox_inches='tight')
                 plt.close(fig_tr)
-                for bu in wybrane_bu:
+                for bu in bu_list:
                     df_bu_rev = df_rev[df_rev['BU PwC'] == bu]
                     df_bu_rev_ly = df_rev_ly[df_rev_ly['BU PwC'] == bu]
                     trend_rev = get_monthly_trend(df_bu_rev, df_bu_rev_ly, is_cost=False, max_month=miesiac)
@@ -271,7 +276,7 @@ if uploaded_file is not None:
             # TAB 3
             if not margin_df.empty:
                 df_pdf_m = format_df_for_pdf(margin_df[cols_margin], format_margin)
-                fig_tm = plot_dataframe_to_fig(df_pdf_m, f"3. ZYSKOWNOŚĆ / MARŻA (YTD do miesiąca {miesiac})")
+                fig_tm = plot_dataframe_to_fig(df_pdf_m, f"3. {title_prefix} - ZYSKOWNOŚĆ / MARŻA (YTD do m-ca {miesiac})")
                 pdf.savefig(fig_tm, bbox_inches='tight')
                 plt.close(fig_tm)
 
@@ -294,19 +299,47 @@ if uploaded_file is not None:
         'Odchylenie Marży do BGT': '{:,.0f}', 'Zmiana Marży YoY': '{:,.0f}'
     }
 
-    # PRZYCISK PDF
+    # SEKCJA EKSPORTU PDF & ZIP
     st.sidebar.markdown("---")
-    st.sidebar.subheader("📄 Eksport Danych")
+    st.sidebar.subheader("📄 Eksport Danych do PDF")
+    
+    # 1. Zwykły eksport dla jednostek wybranych w filtrze
     if wybrane_bu:
-        pdf_bytes = generate_pdf_report()
+        pdf_bytes = generate_pdf_report(wybrane_bu)
         st.sidebar.download_button(
-            label="📥 Pobierz Raport PDF (Tabs 1-3)",
+            label="📥 Pobierz widok bieżący (PDF)",
             data=pdf_bytes,
-            file_name=f"Raport_BU_do_Miesiaca_{miesiac}.pdf",
+            file_name=f"Raport_Wybrane_BU_msc_{miesiac}.pdf",
             mime="application/pdf"
         )
     else:
-        st.sidebar.info("Wybierz jednostki BU, aby pobrać raport.")
+        st.sidebar.info("Wybierz jednostki w filtrze, aby pobrać.")
+
+    # 2. Przycisk do wygenerowania 5 osobnych plików dla grupy Delivery
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Masowy eksport dla grupy Delivery:**")
+    
+    if st.sidebar.button("Eksportuj 5 BU Delivery"):
+        with st.spinner("Generowanie 5 plików PDF do formatu ZIP..."):
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                for bu in target_bus:
+                    # Generuj PDF dla pojedynczego BU
+                    pdf_data = generate_pdf_report([bu])
+                    # Stwórz bezpieczną nazwę usuwając znaki niedozwolone w nazwach plików
+                    safe_name = bu.replace("/", "_").replace(" ", "_")
+                    zip_file.writestr(f"{safe_name}_YTD_Msc_{miesiac}.pdf", pdf_data)
+            
+            # Zapisz do sesji, aby przycisk pobierania pojawił się natychmiast
+            st.session_state['zip_export'] = zip_buffer.getvalue()
+            
+    if 'zip_export' in st.session_state:
+        st.sidebar.download_button(
+            label="📦 Pobierz wygenerowany ZIP",
+            data=st.session_state['zip_export'],
+            file_name=f"Raporty_5_BU_Delivery_msc_{miesiac}.zip",
+            mime="application/zip"
+        )
 
     # Zakładki
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📉 Koszty", "📈 Przychody", "💰 Zyskowność", "🚀 Delivery", "🌐 Całe Communications"])
