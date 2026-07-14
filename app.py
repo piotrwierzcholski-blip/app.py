@@ -196,6 +196,12 @@ if uploaded_file is not None:
             st.pyplot(fig)
             plt.close(fig)
 
+    # Funkcja przypisująca Level 1 do odpowiedniej "Tarczy" kosztów
+    def group_cost_line(line):
+        if 'Goods Sold' in line: return 'Koszty Bezpośrednie (COGS)'
+        elif 'Sales & Marketing' in line: return 'Koszty Sprzedaży (S&M)'
+        else: return 'Koszty Zarządu (G&A)'
+
     # --- FUNKCJE DO GENEROWANIA PDF ---
     def format_df_for_pdf(df, format_dict):
         df_pdf = df.copy()
@@ -303,7 +309,7 @@ if uploaded_file is not None:
         st.sidebar.info("Wybierz jednostki BU, aby pobrać raport.")
 
     # Zakładki
-    tab1, tab2, tab3, tab4 = st.tabs(["📉 Koszty", "📈 Przychody", "💰 Zyskowność", "🚀 Delivery Communication"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📉 Koszty", "📈 Przychody", "💰 Zyskowność", "🚀 Delivery", "🌐 Całe Communications"])
 
     with tab1:
         st.subheader(f"Wydatki Kosztowe - CAŁOŚĆ (YTD do miesiąca {miesiac})")
@@ -427,11 +433,6 @@ if uploaded_file is not None:
         col_pie1, col_pie2 = st.columns(2)
         
         df_deliv_costs_act = df_deliv_costs[(df_deliv_costs['Miesiąc'] <= miesiac) & (df_deliv_costs['Rodzaj danych'] == 'ACT')].copy()
-        def group_cost_line(line):
-            if 'Goods Sold' in line: return 'Koszty Bezpośrednie (COGS)'
-            elif 'Sales & Marketing' in line: return 'Koszty Sprzedaży (S&M)'
-            else: return 'Koszty Zarządu (G&A)'
-            
         df_deliv_costs_act['Grupa Kosztowa'] = df_deliv_costs_act['Mapping P&L Line - level 1'].apply(group_cost_line)
         pie_costs_data = df_deliv_costs_act.groupby('Grupa Kosztowa')['Sum of Wartość'].sum() * -1
         pie_costs_data = pie_costs_data[pie_costs_data > 0].reset_index()
@@ -459,6 +460,83 @@ if uploaded_file is not None:
                                     hovertemplate='<b>%{label}</b><br>Wartość: %{value:,.0f} PLN<br>Udział: %{percent}<extra></extra>')
                 fig_r.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
                 st.plotly_chart(fig_r, use_container_width=True)
+
+    with tab5:
+        st.subheader("Skonsolidowany wynik: Całe Communications")
+        st.caption("Uwaga: Ten widok sumuje absolutnie wszystkie jednostki dostępne w pliku dla danego roku.")
+        
+        df_comm = df_rok.copy()
+        df_comm['BU PwC'] = 'Communications (SUMA CAŁOŚĆ)'
+        df_comm_ly = df_ly.copy()
+        df_comm_ly['BU PwC'] = 'Communications (SUMA CAŁOŚĆ)'
+        
+        df_comm_costs = df_comm[df_comm['Mapping P&L Line - level 1'].isin(cost_lines)]
+        df_comm_costs_ly = df_comm_ly[df_comm_ly['Mapping P&L Line - level 1'].isin(cost_lines)]
+        df_comm_rev = df_comm[df_comm['Mapping P&L Line - level 1'] == 'Total Revenue']
+        df_comm_rev_ly = df_comm_ly[df_comm_ly['Mapping P&L Line - level 1'] == 'Total Revenue']
+        
+        c_res_comm = calculate_ytd(df_comm_costs, df_comm_costs_ly, is_cost=True)
+        r_res_comm = calculate_ytd(df_comm_rev, df_comm_rev_ly, is_cost=False)
+        
+        col1_comm, col2_comm = st.columns(2)
+        with col1_comm:
+            st.info("KOSZTY (YTD)")
+            if not c_res_comm.empty:
+                st.dataframe(c_res_comm[cols_std].style.format(format_std))
+            
+            with st.expander("👀 Pokaż szczegóły: Compensation COGS"):
+                df_comm_payroll = df_comm[df_comm['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
+                df_comm_payroll_ly = df_comm_ly[df_comm_ly['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
+                res_comm_payroll = calculate_ytd(df_comm_payroll, df_comm_payroll_ly, is_cost=True)
+                if not res_comm_payroll.empty:
+                    st.dataframe(res_comm_payroll[cols_std].style.format(format_std).background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn_r'))
+            
+            trend_comm_costs = get_monthly_trend(df_comm_costs, df_comm_costs_ly, is_cost=True, max_month=miesiac)
+            if not trend_comm_costs.empty:
+                 draw_side_by_side_bar_chart(trend_comm_costs, title="KOSZTY: Całe Communications", is_cost=True)
+
+        with col2_comm:
+            st.success("PRZYCHODY (YTD)")
+            if not r_res_comm.empty:
+                st.dataframe(r_res_comm[cols_std].style.format(format_std))
+            
+            trend_comm_rev = get_monthly_trend(df_comm_rev, df_comm_rev_ly, is_cost=False, max_month=miesiac)
+            if not trend_comm_rev.empty:
+                 draw_side_by_side_bar_chart(trend_comm_rev, title="PRZYCHODY: Całe Communications", is_cost=False)
+                 
+        st.divider()
+        st.subheader("Struktura P&L dla całego Communications (YTD Wykonanie)")
+        
+        col_pie1_comm, col_pie2_comm = st.columns(2)
+        
+        df_comm_costs_act = df_comm_costs[(df_comm_costs['Miesiąc'] <= miesiac) & (df_comm_costs['Rodzaj danych'] == 'ACT')].copy()
+        df_comm_costs_act['Grupa Kosztowa'] = df_comm_costs_act['Mapping P&L Line - level 1'].apply(group_cost_line)
+        pie_costs_data_comm = df_comm_costs_act.groupby('Grupa Kosztowa')['Sum of Wartość'].sum() * -1
+        pie_costs_data_comm = pie_costs_data_comm[pie_costs_data_comm > 0].reset_index()
+        
+        df_comm_rev_act = df_comm_rev[(df_comm_rev['Miesiąc'] <= miesiac) & (df_comm_rev['Rodzaj danych'] == 'ACT')].copy()
+        pie_rev_data_comm = df_comm_rev_act.groupby('Mapping P&L Line - level 2')['Sum of Wartość'].sum().reset_index()
+        pie_rev_data_comm = pie_rev_data_comm[pie_rev_data_comm['Sum of Wartość'] > 0]
+
+        with col_pie1_comm:
+            if not pie_costs_data_comm.empty:
+                fig_c_comm = px.pie(pie_costs_data_comm, values='Sum of Wartość', names='Grupa Kosztowa', 
+                               title='Struktura Kosztów (COGS vs S&M vs G&A)', hole=0.4,
+                               color_discrete_sequence=px.colors.sequential.Blues_r)
+                fig_c_comm.update_traces(textposition='inside', textinfo='percent+label',
+                                    hovertemplate='<b>%{label}</b><br>Wartość: %{value:,.0f} PLN<br>Udział: %{percent}<extra></extra>')
+                fig_c_comm.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
+                st.plotly_chart(fig_c_comm, use_container_width=True)
+
+        with col_pie2_comm:
+            if not pie_rev_data_comm.empty:
+                fig_r_comm = px.pie(pie_rev_data_comm, values='Sum of Wartość', names='Mapping P&L Line - level 2', 
+                               title='Struktura Przychodów (Kategorie Level 2)', hole=0.4,
+                               color_discrete_sequence=px.colors.sequential.Greens_r)
+                fig_r_comm.update_traces(textposition='inside', textinfo='percent+label',
+                                    hovertemplate='<b>%{label}</b><br>Wartość: %{value:,.0f} PLN<br>Udział: %{percent}<extra></extra>')
+                fig_r_comm.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
+                st.plotly_chart(fig_r_comm, use_container_width=True)
 
 else:
     st.info("Czekam na wgranie pliku w panelu bocznym po lewej stronie 👈")
