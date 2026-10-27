@@ -92,4 +92,513 @@ if uploaded_file is not None:
     # --- FUNKCJE POMOCNICZE ---
     def calculate_ytd(data_subset, data_ly_subset, is_cost=False):
         ytd_act = data_subset[(data_subset['Miesiąc'] <= miesiac) & (data_subset['Rodzaj danych'] == 'ACT')].groupby('BU PwC')['Sum of Wartość'].sum()
-        ytd_bgt = data_subset[(data_subset['Miesiąc'] <= miesiac) & (data
+        ytd_bgt = data_subset[(data_subset['Miesiąc'] <= miesiac) & (data_subset['Rodzaj danych'] == 'BGT')].groupby('BU PwC')['Sum of Wartość'].sum()
+        ytd_ly = data_ly_subset[(data_ly_subset['Miesiąc'] <= miesiac) & (data_ly_subset['Rodzaj danych'] == 'ACT')].groupby('BU PwC')['Sum of Wartość'].sum()
+        
+        if is_cost:
+            ytd_act, ytd_bgt, ytd_ly = ytd_act * -1, ytd_bgt * -1, ytd_ly * -1
+            
+        res = pd.DataFrame({'YTD ACT': ytd_act, 'YTD BGT': ytd_bgt, 'YTD LY': ytd_ly}).fillna(0)
+        res = res[(res['YTD ACT'] != 0) | (res['YTD BGT'] != 0) | (res['YTD LY'] != 0)]
+        res['% Realizacji BGT'] = (res['YTD ACT'] / res['YTD BGT'].replace(0, np.nan)) * 100
+        res['Odchylenie do BGT'] = res['YTD ACT'] - res['YTD BGT']
+        
+        if pokaz_yoy:
+            res['Zmiana kwotowa YoY'] = res['YTD ACT'] - res['YTD LY']
+            res['Dynamika YoY (%)'] = (res['YTD ACT'] / res['YTD LY'].replace(0, np.nan) - 1) * 100
+            
+        return res.sort_values('YTD ACT', ascending=False)
+
+    def calculate_margin(data_rok, data_ly):
+        df_costs = data_rok[data_rok['Mapping P&L Line - level 1'].isin(cost_lines)]
+        df_rev = data_rok[data_rok['Mapping P&L Line - level 1'] == 'Total Revenue']
+        df_costs_ly = data_ly[data_ly['Mapping P&L Line - level 1'].isin(cost_lines)]
+        df_rev_ly = data_ly[data_ly['Mapping P&L Line - level 1'] == 'Total Revenue']
+        
+        res_costs = calculate_ytd(df_costs, df_costs_ly, is_cost=True)
+        res_rev = calculate_ytd(df_rev, df_rev_ly, is_cost=False)
+        
+        margin = pd.DataFrame(index=res_rev.index.union(res_costs.index)).fillna(0)
+        
+        for col in ['YTD ACT', 'YTD BGT', 'YTD LY']:
+            margin[f'Przychody {col}'] = res_rev[col] if col in res_rev.columns else 0
+            margin[f'Koszty {col}'] = res_costs[col] if col in res_costs.columns else 0
+            margin[f'Przychody {col}'] = margin[f'Przychody {col}'].fillna(0)
+            margin[f'Koszty {col}'] = margin[f'Koszty {col}'].fillna(0)
+            margin[f'Marża {col}'] = margin[f'Przychody {col}'] - margin[f'Koszty {col}']
+            margin[f'Marża % {col}'] = (margin[f'Marża {col}'] / margin[f'Przychody {col}'].replace(0, np.nan)) * 100
+            
+        margin['Odchylenie Marży do BGT'] = margin['Marża YTD ACT'] - margin['Marża YTD BGT']
+        if pokaz_yoy:
+            margin['Zmiana Marży YoY'] = margin['Marża YTD ACT'] - margin['Marża YTD LY']
+        
+        return margin
+
+    def get_monthly_trend(data_subset, data_ly_subset, is_cost=False, max_month=12, force_non_cumulative=False):
+        df_trend = data_subset[data_subset['Miesiąc'] <= max_month]
+        df_trend_ly = data_ly_subset[data_ly_subset['Miesiąc'] <= max_month]
+        
+        trend = df_trend.groupby(['Miesiąc', 'Rodzaj danych'])['Sum of Wartość'].sum().unstack(fill_value=0) if not df_trend.empty else pd.DataFrame()
+        trend_ly = df_trend_ly[df_trend_ly['Rodzaj danych'] == 'ACT'].groupby('Miesiąc')['Sum of Wartość'].sum() if not df_trend_ly.empty else pd.Series()
+        
+        if is_cost:
+            trend = trend * -1
+            trend_ly = trend_ly * -1
+            
+        for col in ['ACT', 'BGT']:
+            if col not in trend.columns:
+                trend[col] = 0
+                
+        trend['LY'] = trend_ly
+        trend['LY'] = trend['LY'].fillna(0)
+        
+        trend = trend / 1e6 
+        trend = trend[['ACT', 'BGT', 'LY']]
+        
+        all_months = list(range(1, max_month + 1))
+        trend = trend.reindex(all_months).fillna(0)
+        
+        if wykresy_narastajaco and not force_non_cumulative:
+            trend = trend.cumsum()
+        
+        miesiące_nazwy = {1: 'Sty', 2: 'Lut', 3: 'Mar', 4: 'Kwi', 5: 'Maj', 6: 'Cze', 
+                          7: 'Lip', 8: 'Sie', 9: 'Wrz', 10: 'Paź', 11: 'Lis', 12: 'Gru'}
+        trend.index = trend.index.map(miesiące_nazwy)
+        
+        return trend
+
+    def draw_side_by_side_bar_chart(trend_data, title, is_cost=True, return_fig=False, force_non_cumulative=False):
+        fig, ax = plt.subplots(figsize=(10, 3.5))
+        x = np.arange(len(trend_data.index))
+        
+        color_act = '#2b5c8f'
+        color_bgt = '#e28743'
+        color_ly = '#a5b1c2'
+
+        if pokaz_yoy:
+            width = 0.25
+            ax.bar(x - width, trend_data['LY'], width, label='Zeszły Rok (LY)', color=color_ly)
+            ax.bar(x, trend_data['ACT'], width, label='Wykonanie (ACT)', color=color_act)
+            ax.bar(x + width, trend_data['BGT'], width, label='Budżet (BGT)', color=color_bgt)
+        else:
+            width = 0.35
+            ax.bar(x - width/2, trend_data['ACT'], width, label='Wykonanie (ACT)', color=color_act)
+            ax.bar(x + width/2, trend_data['BGT'], width, label='Budżet (BGT)', color=color_bgt)
+        
+        ax.set_ylabel('mln PLN', fontsize=9)
+        tytul_wykresu = f"{title} (Skumulowane YTD)" if (wykresy_narastajaco and not force_non_cumulative) else title
+        ax.set_title(tytul_wykresu, fontsize=11, fontweight='bold', color='#1a365d')
+        ax.set_xticks(x)
+        ax.set_xticklabels(trend_data.index, fontsize=9)
+        ax.legend(fontsize=9)
+        ax.grid(axis='y', linestyle='--', alpha=0.5)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        plt.tight_layout()
+        if return_fig:
+            return fig
+        else:
+            st.pyplot(fig)
+            plt.close(fig)
+
+    def group_cost_line(line):
+        if 'Goods Sold' in line: return 'Koszty Bezpośrednie (COGS)'
+        elif 'Sales & Marketing' in line: return 'Koszty Sprzedaży (S&M)'
+        else: return 'Koszty Zarządu (G&A)'
+
+    # --- FUNKCJE DO GENEROWANIA PDF ---
+    def format_df_for_pdf(df, format_dict):
+        df_pdf = df.copy()
+        for col, f_str in format_dict.items():
+            if col in df_pdf.columns:
+                df_pdf[col] = df_pdf[col].apply(lambda x: f_str.format(x) if pd.notnull(x) else "")
+        return df_pdf.reset_index()
+
+    def plot_dataframe_to_fig(df, title):
+        fig, ax = plt.subplots(figsize=(12, max(2, len(df) * 0.5)))
+        ax.axis('tight')
+        ax.axis('off')
+        ax.set_title(title, fontsize=14, fontweight='bold', pad=20, color='#1a365d')
+        table = ax.table(cellText=df.values, colLabels=df.columns, loc='center', cellLoc='center')
+        table.auto_set_font_size(False)
+        table.set_fontsize(8)
+        table.scale(1, 1.8)
+        for (row, col), cell in table.get_celld().items():
+            if row == 0:
+                cell.set_text_props(weight='bold', color='white')
+                cell.set_facecolor('#2b5c8f')
+        return fig
+
+    def generate_pdf_report(bu_list):
+        pdf_buffer = io.BytesIO()
+        with PdfPages(pdf_buffer) as pdf:
+            df_costs = df_rok[df_rok['BU PwC'].isin(bu_list) & df_rok['Mapping P&L Line - level 1'].isin(cost_lines)]
+            df_costs_ly = df_ly[df_ly['BU PwC'].isin(bu_list) & df_ly['Mapping P&L Line - level 1'].isin(cost_lines)]
+            res_costs = calculate_ytd(df_costs, df_costs_ly, is_cost=True)
+            
+            df_rev = df_rok[df_rok['BU PwC'].isin(bu_list) & (df_rok['Mapping P&L Line - level 1'] == 'Total Revenue')]
+            df_rev_ly = df_ly[df_ly['BU PwC'].isin(bu_list) & (df_ly['Mapping P&L Line - level 1'] == 'Total Revenue')]
+            res_rev = calculate_ytd(df_rev, df_rev_ly, is_cost=False)
+            
+            df_rok_bu = df_rok[df_rok['BU PwC'].isin(bu_list)]
+            df_ly_bu = df_ly[df_ly['BU PwC'].isin(bu_list)]
+            margin_df = calculate_margin(df_rok_bu, df_ly_bu)
+
+            title_prefix = bu_list[0] if len(bu_list) == 1 else "WYBRANE JEDNOSTKI"
+
+            # TAB 1
+            if not res_costs.empty:
+                df_pdf_c = format_df_for_pdf(res_costs[cols_std], format_std)
+                fig_tc = plot_dataframe_to_fig(df_pdf_c, f"1. {title_prefix} - KOSZTY CAŁOŚĆ (YTD do m-ca {miesiac})")
+                pdf.savefig(fig_tc, bbox_inches='tight')
+                plt.close(fig_tc)
+                for bu in bu_list:
+                    df_bu_costs = df_costs[df_costs['BU PwC'] == bu]
+                    df_bu_costs_ly = df_costs_ly[df_costs_ly['BU PwC'] == bu]
+                    trend_costs = get_monthly_trend(df_bu_costs, df_bu_costs_ly, is_cost=True, max_month=miesiac)
+                    if not trend_costs.empty and (trend_costs.sum().sum() != 0):
+                        fig_chart_c = draw_side_by_side_bar_chart(trend_costs, f"KOSZTY: {bu}", is_cost=True, return_fig=True)
+                        pdf.savefig(fig_chart_c, bbox_inches='tight')
+                        plt.close(fig_chart_c)
+
+            # TAB 2
+            if not res_rev.empty:
+                df_pdf_r = format_df_for_pdf(res_rev[cols_std], format_std)
+                fig_tr = plot_dataframe_to_fig(df_pdf_r, f"2. {title_prefix} - PRZYCHODY (YTD do m-ca {miesiac})")
+                pdf.savefig(fig_tr, bbox_inches='tight')
+                plt.close(fig_tr)
+                for bu in bu_list:
+                    df_bu_rev = df_rev[df_rev['BU PwC'] == bu]
+                    df_bu_rev_ly = df_rev_ly[df_rev_ly['BU PwC'] == bu]
+                    trend_rev = get_monthly_trend(df_bu_rev, df_bu_rev_ly, is_cost=False, max_month=miesiac)
+                    if not trend_rev.empty and (trend_rev.sum().sum() != 0):
+                        fig_chart_r = draw_side_by_side_bar_chart(trend_rev, f"PRZYCHODY: {bu}", is_cost=False, return_fig=True)
+                        pdf.savefig(fig_chart_r, bbox_inches='tight')
+                        plt.close(fig_chart_r)
+
+            # TAB 3
+            if not margin_df.empty:
+                df_pdf_m = format_df_for_pdf(margin_df[cols_margin], format_margin)
+                fig_tm = plot_dataframe_to_fig(df_pdf_m, f"3. {title_prefix} - ZYSKOWNOŚĆ / MARŻA (YTD do m-ca {miesiac})")
+                pdf.savefig(fig_tm, bbox_inches='tight')
+                plt.close(fig_tm)
+
+        return pdf_buffer.getvalue()
+
+    # Formaty
+    if pokaz_yoy:
+        cols_std = ['YTD ACT', 'YTD BGT', '% Realizacji BGT', 'Odchylenie do BGT', 'YTD LY', 'Zmiana kwotowa YoY', 'Dynamika YoY (%)']
+        format_std = {'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'YTD LY': '{:,.0f}', 'Odchylenie do BGT': '{:,.0f}', 'Zmiana kwotowa YoY': '{:,.0f}', '% Realizacji BGT': '{:.1f}%', 'Dynamika YoY (%)': '{:.1f}%'}
+        cols_margin = ['Przychody YTD ACT', 'Koszty YTD ACT', 'Marża YTD ACT', 'Marża YTD BGT', 'Marża YTD LY', 'Marża % YTD ACT', 'Marża % YTD BGT', 'Marża % YTD LY', 'Odchylenie Marży do BGT', 'Zmiana Marży YoY']
+    else:
+        cols_std = ['YTD ACT', 'YTD BGT', '% Realizacji BGT', 'Odchylenie do BGT']
+        format_std = {'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'Odchylenie do BGT': '{:,.0f}', '% Realizacji BGT': '{:.1f}%'}
+        cols_margin = ['Przychody YTD ACT', 'Koszty YTD ACT', 'Marża YTD ACT', 'Marża YTD BGT', 'Marża % YTD ACT', 'Marża % YTD BGT', 'Odchylenie Marży do BGT']
+        
+    format_margin = {
+        'Przychody YTD ACT': '{:,.0f}', 'Koszty YTD ACT': '{:,.0f}',
+        'Marża YTD ACT': '{:,.0f}', 'Marża YTD BGT': '{:,.0f}', 'Marża YTD LY': '{:,.0f}',
+        'Marża % YTD ACT': '{:.1f}%', 'Marża % YTD BGT': '{:.1f}%', 'Marża % YTD LY': '{:.1f}%',
+        'Odchylenie Marży do BGT': '{:,.0f}', 'Zmiana Marży YoY': '{:,.0f}'
+    }
+
+    # SEKCJA EKSPORTU PDF & ZIP
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📄 Eksport Danych do PDF")
+    
+    if wybrane_bu:
+        pdf_bytes = generate_pdf_report(wybrane_bu)
+        st.sidebar.download_button(
+            label="📥 Pobierz widok bieżący (PDF)",
+            data=pdf_bytes,
+            file_name=f"Raport_Wybrane_BU_msc_{miesiac}.pdf",
+            mime="application/pdf"
+        )
+    else:
+        st.sidebar.info("Wybierz jednostki w filtrze, aby pobrać.")
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Masowy eksport dla grupy Delivery:**")
+    
+    if st.sidebar.button("Eksportuj 5 BU Delivery"):
+        with st.spinner("Generowanie 5 plików PDF do formatu ZIP..."):
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                for bu in target_bus:
+                    pdf_data = generate_pdf_report([bu])
+                    safe_name = bu.replace("/", "_").replace(" ", "_")
+                    zip_file.writestr(f"{safe_name}_YTD_Msc_{miesiac}.pdf", pdf_data)
+            
+            st.session_state['zip_export'] = zip_buffer.getvalue()
+            
+    if 'zip_export' in st.session_state:
+        st.sidebar.download_button(
+            label="📦 Pobierz wygenerowany ZIP",
+            data=st.session_state['zip_export'],
+            file_name=f"Raporty_5_BU_Delivery_msc_{miesiac}.zip",
+            mime="application/zip"
+        )
+
+    # Zakładki
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📉 Koszty", "📈 Przychody", "💰 Zyskowność", "🚀 Delivery", "🌐 Całe Communications"])
+
+    with tab1:
+        st.subheader(f"Wydatki Kosztowe - CAŁOŚĆ (YTD do miesiąca {miesiac})")
+        if wybrane_bu:
+            df_costs = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 1'].isin(cost_lines)]
+            df_costs_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 1'].isin(cost_lines)]
+            
+            res_costs = calculate_ytd(df_costs, df_costs_ly, is_cost=True)
+            style_c = res_costs[cols_std].style.format(format_std)
+            if podswietl_delivery:
+                style_c = style_c.apply(highlight_delivery, axis=1)
+            style_c = style_c.background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn_r')
+            st.dataframe(style_c, use_container_width=True)
+            
+            with st.expander("👀 Pokaż szczegóły: Compensation COGS"):
+                df_payroll = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
+                df_payroll_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
+                res_payroll = calculate_ytd(df_payroll, df_payroll_ly, is_cost=True)
+                if not res_payroll.empty:
+                    style_p = res_payroll[cols_std].style.format(format_std)
+                    if podswietl_delivery:
+                        style_p = style_p.apply(highlight_delivery, axis=1)
+                    style_p = style_p.background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn_r')
+                    st.dataframe(style_p, use_container_width=True)
+                else:
+                    st.info("Brak kosztów Compensation COGS w wybranych jednostkach.")
+            
+            st.divider()
+            for bu in wybrane_bu:
+                df_bu_costs = df_costs[df_costs['BU PwC'] == bu]
+                df_bu_costs_ly = df_costs_ly[df_costs_ly['BU PwC'] == bu]
+                trend_costs = get_monthly_trend(df_bu_costs, df_bu_costs_ly, is_cost=True, max_month=miesiac)
+                if not trend_costs.empty and (trend_costs.sum().sum() != 0):
+                    draw_side_by_side_bar_chart(trend_costs, title=f"KOSZTY: {bu}", is_cost=True)
+        else:
+            st.warning("Wybierz przynajmniej jedno BU z panelu po lewej stronie.")
+
+    with tab2:
+        st.subheader(f"Wykonanie Przychodów (YTD do miesiąca {miesiac})")
+        if wybrane_bu:
+            df_rev = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 1'] == 'Total Revenue']
+            df_rev_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 1'] == 'Total Revenue']
+            
+            res_rev = calculate_ytd(df_rev, df_rev_ly, is_cost=False)
+            style_r = res_rev[cols_std].style.format(format_std)
+            if podswietl_delivery:
+                style_r = style_r.apply(highlight_delivery, axis=1)
+            style_r = style_r.background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn')
+            st.dataframe(style_r, use_container_width=True)
+            
+            with st.expander("👀 Pokaż szczegóły: Billed Revenue"):
+                df_billed = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 2'].isin(billed_rev_lines)]
+                df_billed_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 2'].isin(billed_rev_lines)]
+                res_billed = calculate_ytd(df_billed, df_billed_ly, is_cost=False)
+                if not res_billed.empty:
+                    style_b = res_billed[cols_std].style.format(format_std)
+                    if podswietl_delivery:
+                        style_b = style_b.apply(highlight_delivery, axis=1)
+                    style_b = style_b.background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn')
+                    st.dataframe(style_b, use_container_width=True)
+                else:
+                    st.info("Brak Billed Revenue w wybranych jednostkach.")
+            
+            st.divider()
+            for bu in wybrane_bu:
+                df_bu_rev = df_rev[df_rev['BU PwC'] == bu]
+                df_bu_rev_ly = df_rev_ly[df_rev_ly['BU PwC'] == bu]
+                trend_rev = get_monthly_trend(df_bu_rev, df_bu_rev_ly, is_cost=False, max_month=miesiac)
+                if not trend_rev.empty and (trend_rev.sum().sum() != 0):
+                    draw_side_by_side_bar_chart(trend_rev, title=f"PRZYCHODY: {bu}", is_cost=False)
+        else:
+            st.warning("Wybierz przynajmniej jedno BU z panelu po lewej stronie.")
+
+    with tab3:
+        st.subheader(f"Kalkulacja Zyskowności / Marży (YTD do miesiąca {miesiac})")
+        if wybrane_bu:
+            margin_df = calculate_margin(df_rok_filtered, df_ly_filtered)
+            style_m = margin_df[cols_margin].style.format(format_margin)
+            if podswietl_delivery:
+                style_m = style_m.apply(highlight_delivery, axis=1)
+            style_m = style_m.background_gradient(subset=['Odchylenie Marży do BGT'], cmap='RdYlGn')
+            st.dataframe(style_m, use_container_width=True)
+        else:
+            st.warning("Wybierz przynajmniej jedno BU z panelu po lewej stronie.")
+
+    with tab4:
+        st.subheader("Skonsolidowany wynik: Delivery Communication")
+        st.caption("Uwaga: Ten widok to z góry zdefiniowana suma 5 jednostek Delivery.")
+        
+        df_deliv = df_rok[df_rok['BU PwC'].isin(target_bus)].copy()
+        df_deliv['BU PwC'] = 'Delivery Communication (SUMA)'
+        df_deliv_ly = df_ly[df_ly['BU PwC'].isin(target_bus)].copy()
+        df_deliv_ly['BU PwC'] = 'Delivery Communication (SUMA)'
+        
+        df_deliv_costs = df_deliv[df_deliv['Mapping P&L Line - level 1'].isin(cost_lines)]
+        df_deliv_costs_ly = df_deliv_ly[df_deliv_ly['Mapping P&L Line - level 1'].isin(cost_lines)]
+        df_deliv_rev = df_deliv[df_deliv['Mapping P&L Line - level 1'] == 'Total Revenue']
+        df_deliv_rev_ly = df_deliv_ly[df_deliv_ly['Mapping P&L Line - level 1'] == 'Total Revenue']
+        
+        c_res = calculate_ytd(df_deliv_costs, df_deliv_costs_ly, is_cost=True)
+        r_res = calculate_ytd(df_deliv_rev, df_deliv_rev_ly, is_cost=False)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info("KOSZTY (YTD)")
+            style_deliv_c = c_res[cols_std].style.format(format_std)
+            if podswietl_delivery:
+                style_deliv_c = style_deliv_c.apply(highlight_delivery, axis=1)
+            st.dataframe(style_deliv_c)
+            
+            with st.expander("👀 Pokaż szczegóły: Compensation COGS"):
+                df_deliv_payroll = df_deliv[df_deliv['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
+                df_deliv_payroll_ly = df_deliv_ly[df_deliv_ly['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
+                res_deliv_payroll = calculate_ytd(df_deliv_payroll, df_deliv_payroll_ly, is_cost=True)
+                if not res_deliv_payroll.empty:
+                    st.dataframe(res_deliv_payroll[cols_std].style.format(format_std).background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn_r'))
+            
+            trend_deliv_costs = get_monthly_trend(df_deliv_costs, df_deliv_costs_ly, is_cost=True, max_month=miesiac)
+            if not trend_deliv_costs.empty:
+                 draw_side_by_side_bar_chart(trend_deliv_costs, title="KOSZTY: Delivery (Skonsolidowane)", is_cost=True)
+
+        with col2:
+            st.success("PRZYCHODY (YTD)")
+            style_deliv_r = r_res[cols_std].style.format(format_std)
+            if podswietl_delivery:
+                style_deliv_r = style_deliv_r.apply(highlight_delivery, axis=1)
+            st.dataframe(style_deliv_r)
+            
+            with st.expander("👀 Pokaż szczegóły: Billed Revenue"):
+                df_deliv_billed = df_deliv[df_deliv['Mapping P&L Line - level 2'].isin(billed_rev_lines)]
+                df_deliv_billed_ly = df_deliv_ly[df_deliv_ly['Mapping P&L Line - level 2'].isin(billed_rev_lines)]
+                res_deliv_billed = calculate_ytd(df_deliv_billed, df_deliv_billed_ly, is_cost=False)
+                if not res_deliv_billed.empty:
+                    st.dataframe(res_deliv_billed[cols_std].style.format(format_std).background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn'))
+            
+            trend_deliv_rev = get_monthly_trend(df_deliv_rev, df_deliv_rev_ly, is_cost=False, max_month=miesiac)
+            if not trend_deliv_rev.empty:
+                 draw_side_by_side_bar_chart(trend_deliv_rev, title="PRZYCHODY: Delivery (Skonsolidowane)", is_cost=False)
+                 
+        st.divider()
+        st.subheader("Struktura P&L dla grupy Delivery (YTD Wykonanie)")
+        
+        col_pie1, col_pie2 = st.columns(2)
+        
+        df_deliv_costs_act = df_deliv_costs[(df_deliv_costs['Miesiąc'] <= miesiac) & (df_deliv_costs['Rodzaj danych'] == 'ACT')].copy()
+        df_deliv_costs_act['Grupa Kosztowa'] = df_deliv_costs_act['Mapping P&L Line - level 1'].apply(group_cost_line)
+        pie_costs_data = df_deliv_costs_act.groupby('Grupa Kosztowa')['Sum of Wartość'].sum() * -1
+        pie_costs_data = pie_costs_data[pie_costs_data > 0].reset_index()
+        
+        df_deliv_rev_act = df_deliv_rev[(df_deliv_rev['Miesiąc'] <= miesiac) & (df_deliv_rev['Rodzaj danych'] == 'ACT')].copy()
+        pie_rev_data = df_deliv_rev_act.groupby('Mapping P&L Line - level 2')['Sum of Wartość'].sum().reset_index()
+        pie_rev_data = pie_rev_data[pie_rev_data['Sum of Wartość'] > 0]
+
+        with col_pie1:
+            if not pie_costs_data.empty:
+                fig_c = px.pie(pie_costs_data, values='Sum of Wartość', names='Grupa Kosztowa', 
+                               title='Struktura Kosztów (COGS vs S&M vs G&A)', hole=0.4,
+                               color_discrete_sequence=px.colors.sequential.Blues_r)
+                fig_c.update_traces(textposition='inside', textinfo='percent+label',
+                                    hovertemplate='<b>%{label}</b><br>Wartość: %{value:,.0f} PLN<br>Udział: %{percent}<extra></extra>')
+                fig_c.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
+                st.plotly_chart(fig_c, use_container_width=True)
+
+        with col_pie2:
+            if not pie_rev_data.empty:
+                fig_r = px.pie(pie_rev_data, values='Sum of Wartość', names='Mapping P&L Line - level 2', 
+                               title='Struktura Przychodów (Kategorie Level 2)', hole=0.4,
+                               color_discrete_sequence=px.colors.sequential.Greens_r)
+                fig_r.update_traces(textposition='inside', textinfo='percent+label',
+                                    hovertemplate='<b>%{label}</b><br>Wartość: %{value:,.0f} PLN<br>Udział: %{percent}<extra></extra>')
+                fig_r.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
+                st.plotly_chart(fig_r, use_container_width=True)
+
+    with tab5:
+        st.subheader("Skonsolidowany wynik: Całe Communications")
+        st.caption("Uwaga: Ten widok sumuje absolutnie wszystkie jednostki dostępne w pliku dla danego roku.")
+        
+        df_comm = df_rok.copy()
+        df_comm['BU PwC'] = 'Communications (SUMA CAŁOŚĆ)'
+        df_comm_ly = df_ly.copy()
+        df_comm_ly['BU PwC'] = 'Communications (SUMA CAŁOŚĆ)'
+        
+        df_comm_costs = df_comm[df_comm['Mapping P&L Line - level 1'].isin(cost_lines)]
+        df_comm_costs_ly = df_comm_ly[df_comm_ly['Mapping P&L Line - level 1'].isin(cost_lines)]
+        df_comm_rev = df_comm[df_comm['Mapping P&L Line - level 1'] == 'Total Revenue']
+        df_comm_rev_ly = df_comm_ly[df_comm_ly['Mapping P&L Line - level 1'] == 'Total Revenue']
+        
+        c_res_comm = calculate_ytd(df_comm_costs, df_comm_costs_ly, is_cost=True)
+        r_res_comm = calculate_ytd(df_comm_rev, df_comm_rev_ly, is_cost=False)
+        
+        col1_comm, col2_comm = st.columns(2)
+        with col1_comm:
+            st.info("KOSZTY (YTD)")
+            if not c_res_comm.empty:
+                st.dataframe(c_res_comm[cols_std].style.format(format_std))
+            
+            with st.expander("👀 Pokaż szczegóły: Compensation COGS"):
+                df_comm_payroll = df_comm[df_comm['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
+                df_comm_payroll_ly = df_comm_ly[df_comm_ly['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
+                res_comm_payroll = calculate_ytd(df_comm_payroll, df_comm_payroll_ly, is_cost=True)
+                if not res_comm_payroll.empty:
+                    st.dataframe(res_comm_payroll[cols_std].style.format(format_std).background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn_r'))
+            
+            trend_comm_costs = get_monthly_trend(df_comm_costs, df_comm_costs_ly, is_cost=True, max_month=miesiac)
+            if not trend_comm_costs.empty:
+                 draw_side_by_side_bar_chart(trend_comm_costs, title="KOSZTY: Całe Communications", is_cost=True)
+
+        with col2_comm:
+            st.success("PRZYCHODY (YTD)")
+            if not r_res_comm.empty:
+                st.dataframe(r_res_comm[cols_std].style.format(format_std))
+                
+            with st.expander("👀 Pokaż szczegóły: Billed Revenue"):
+                df_comm_billed = df_comm[df_comm['Mapping P&L Line - level 2'].isin(billed_rev_lines)]
+                df_comm_billed_ly = df_comm_ly[df_comm_ly['Mapping P&L Line - level 2'].isin(billed_rev_lines)]
+                res_comm_billed = calculate_ytd(df_comm_billed, df_comm_billed_ly, is_cost=False)
+                if not res_comm_billed.empty:
+                    st.dataframe(res_comm_billed[cols_std].style.format(format_std).background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn'))
+            
+            trend_comm_rev = get_monthly_trend(df_comm_rev, df_comm_rev_ly, is_cost=False, max_month=miesiac)
+            if not trend_comm_rev.empty:
+                 draw_side_by_side_bar_chart(trend_comm_rev, title="PRZYCHODY: Całe Communications", is_cost=False)
+                 
+        st.divider()
+        st.subheader("Struktura P&L dla całego Communications (YTD Wykonanie)")
+        
+        col_pie1_comm, col_pie2_comm = st.columns(2)
+        
+        df_comm_costs_act = df_comm_costs[(df_comm_costs['Miesiąc'] <= miesiac) & (df_comm_costs['Rodzaj danych'] == 'ACT')].copy()
+        df_comm_costs_act['Grupa Kosztowa'] = df_comm_costs_act['Mapping P&L Line - level 1'].apply(group_cost_line)
+        pie_costs_data_comm = df_comm_costs_act.groupby('Grupa Kosztowa')['Sum of Wartość'].sum() * -1
+        pie_costs_data_comm = pie_costs_data_comm[pie_costs_data_comm > 0].reset_index()
+        
+        df_comm_rev_act = df_comm_rev[(df_comm_rev['Miesiąc'] <= miesiac) & (df_comm_rev['Rodzaj danych'] == 'ACT')].copy()
+        pie_rev_data_comm = df_comm_rev_act.groupby('Mapping P&L Line - level 2')['Sum of Wartość'].sum().reset_index()
+        pie_rev_data_comm = pie_rev_data_comm[pie_rev_data_comm['Sum of Wartość'] > 0]
+
+        with col_pie1_comm:
+            if not pie_costs_data_comm.empty:
+                fig_c_comm = px.pie(pie_costs_data_comm, values='Sum of Wartość', names='Grupa Kosztowa', 
+                               title='Struktura Kosztów (COGS vs S&M vs G&A)', hole=0.4,
+                               color_discrete_sequence=px.colors.sequential.Blues_r)
+                fig_c_comm.update_traces(textposition='inside', textinfo='percent+label',
+                                    hovertemplate='<b>%{label}</b><br>Wartość: %{value:,.0f} PLN<br>Udział: %{percent}<extra></extra>')
+                fig_c_comm.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
+                st.plotly_chart(fig_c_comm, use_container_width=True)
+
+        with col_pie2_comm:
+            if not pie_rev_data_comm.empty:
+                fig_r_comm = px.pie(pie_rev_data_comm, values='Sum of Wartość', names='Mapping P&L Line - level 2', 
+                               title='Struktura Przychodów (Kategorie Level 2)', hole=0.4,
+                               color_discrete_sequence=px.colors.sequential.Greens_r)
+                fig_r_comm.update_traces(textposition='inside', textinfo='percent+label',
+                                    hovertemplate='<b>%{label}</b><br>Wartość: %{value:,.0f} PLN<br>Udział: %{percent}<extra></extra>')
+                fig_r_comm.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
+                st.plotly_chart(fig_r_comm, use_container_width=True)
+
+else:
+    st.info("Czekam na wgranie pliku w panelu bocznym po lewej stronie 👈")
+# --- KONIEC KODU ---
