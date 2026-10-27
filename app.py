@@ -190,7 +190,8 @@ if uploaded_file is not None:
         trend['LY'] = trend['LY'].fillna(0)
         
         if data_billed is not None:
-            df_trend_billed = data_billed[data_billed['Miesiąc'] <= max_month]
+            # ZMIANA: Dodano filtrowanie do Rodzaj danych == 'ACT' dla Billed Revenue na wykresie
+            df_trend_billed = data_billed[(data_billed['Miesiąc'] <= max_month) & (data_billed['Rodzaj danych'] == 'ACT')]
             trend_billed = df_trend_billed.groupby('Miesiąc')['Sum of Wartość'].sum() if not df_trend_billed.empty else pd.Series()
             trend['BILLED'] = trend_billed
             trend['BILLED'] = trend['BILLED'].fillna(0)
@@ -323,7 +324,7 @@ if uploaded_file is not None:
                         pdf.savefig(fig_chart_c, bbox_inches='tight')
                         plt.close(fig_chart_c)
 
-            # TAB 2 (Zmodyfikowane o Billed Rev)
+            # TAB 2
             if not res_rev.empty:
                 df_pdf_r = format_df_for_pdf(res_rev[cols_rev], format_rev)
                 fig_tr = plot_dataframe_to_fig(df_pdf_r, f"2. {title_prefix} - PRZYCHODY (YTD do m-ca {miesiac})")
@@ -564,7 +565,8 @@ if uploaded_file is not None:
         with col1_comm:
             st.info("KOSZTY (YTD)")
             if not c_res_comm.empty:
-                st.dataframe(c_res_comm[cols_std].style.format(format_std))
+                style_comm_c = c_res_comm[cols_std].style.format(format_std)
+                st.dataframe(style_comm_c)
             
             with st.expander("👀 Pokaż szczegóły: Compensation COGS"):
                 df_comm_payroll = df_comm[df_comm['Mapping P&L Line - level 2'].isin(cogs_comp_lines)]
@@ -580,7 +582,8 @@ if uploaded_file is not None:
         with col2_comm:
             st.success("PRZYCHODY (YTD)")
             if not r_res_comm.empty:
-                st.dataframe(r_res_comm[cols_rev].style.format(format_rev))
+                style_comm_r = r_res_comm[cols_rev].style.format(format_rev)
+                st.dataframe(style_comm_r)
             
             trend_comm_rev = get_monthly_trend(df_comm_rev, df_comm_rev_ly, is_cost=False, max_month=miesiac, data_billed=df_comm_billed)
             if not trend_comm_rev.empty:
