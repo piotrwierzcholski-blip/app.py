@@ -53,7 +53,7 @@ if uploaded_file is not None:
     lista_bu = sorted(df['BU PwC'].dropna().astype(str).unique())
     wybrane_bu = st.sidebar.multiselect("Filtruj po BU", options=lista_bu, default=lista_bu)
 
-    # LISTA KOSZTÓW GŁÓWNYCH (EBITDA)
+    # DEFINICJE LINII
     cost_lines = [
         'Total Cost of Goods Sold', 
         'Total Cost of Sales & Marketing',
@@ -63,29 +63,48 @@ if uploaded_file is not None:
         'Cost of General Administration - Pension provision and vacation accrual'
     ]
     
-    # LISTA COMPENSATION COGS (Level 2)
     cogs_comp_lines = [
         'Cost of Goods Sold - Salaries & Social Security Tax',
         'Cost of Goods Sold - Bonuses'
     ]
     
-    # LISTA BILLED REVENUE (Level 2)
     billed_rev_lines = [
         'Billed revenue'
     ]
     
     target_bus = ['BU BSS Delivery', 'BU OSS Delivery', 'BU Cross Services Delivery', 'BU IA&A Delivery', 'BU Smart BSS/IoT Connect']
     
+    # --- FORMATOWANIE TABEL (GLOBALNE) ---
+    if pokaz_yoy:
+        cols_std = ['YTD ACT', 'YTD BGT', '% Realizacji BGT', 'Odchylenie do BGT', 'YTD LY', 'Zmiana kwotowa YoY', 'Dynamika YoY (%)']
+        cols_rev = ['YTD ACT', 'Billed Rev YTD ACT', '% Billed/Total', 'YTD BGT', '% Realizacji BGT', 'Odchylenie do BGT', 'YTD LY', 'Zmiana kwotowa YoY', 'Dynamika YoY (%)']
+        format_std = {'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'YTD LY': '{:,.0f}', 'Odchylenie do BGT': '{:,.0f}', 'Zmiana kwotowa YoY': '{:,.0f}', '% Realizacji BGT': '{:.1f}%', 'Dynamika YoY (%)': '{:.1f}%'}
+        cols_margin = ['Przychody YTD ACT', 'Koszty YTD ACT', 'Marża YTD ACT', 'Marża YTD BGT', 'Marża YTD LY', 'Marża % YTD ACT', 'Marża % YTD BGT', 'Marża % YTD LY', 'Odchylenie Marży do BGT', 'Zmiana Marży YoY']
+    else:
+        cols_std = ['YTD ACT', 'YTD BGT', '% Realizacji BGT', 'Odchylenie do BGT']
+        cols_rev = ['YTD ACT', 'Billed Rev YTD ACT', '% Billed/Total', 'YTD BGT', '% Realizacji BGT', 'Odchylenie do BGT']
+        format_std = {'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'Odchylenie do BGT': '{:,.0f}', '% Realizacji BGT': '{:.1f}%'}
+        cols_margin = ['Przychody YTD ACT', 'Koszty YTD ACT', 'Marża YTD ACT', 'Marża YTD BGT', 'Marża % YTD ACT', 'Marża % YTD BGT', 'Odchylenie Marży do BGT']
+        
+    format_rev = format_std.copy()
+    format_rev['Billed Rev YTD ACT'] = '{:,.0f}'
+    format_rev['% Billed/Total'] = '{:.1f}%'
+
+    format_margin = {
+        'Przychody YTD ACT': '{:,.0f}', 'Koszty YTD ACT': '{:,.0f}',
+        'Marża YTD ACT': '{:,.0f}', 'Marża YTD BGT': '{:,.0f}', 'Marża YTD LY': '{:,.0f}',
+        'Marża % YTD ACT': '{:.1f}%', 'Marża % YTD BGT': '{:.1f}%', 'Marża % YTD LY': '{:.1f}%',
+        'Odchylenie Marży do BGT': '{:,.0f}', 'Zmiana Marży YoY': '{:,.0f}'
+    }
+    
     def highlight_delivery(row):
         if row.name in target_bus or 'Delivery Communication' in str(row.name):
             return ['background-color: #e6f2ff'] * len(row)
         return [''] * len(row)
 
-    # Dane bieżące
+    # Dane bieżące i LY
     df_rok = df[df['Rok'] == rok]
     df_rok_filtered = df_rok[df_rok['BU PwC'].isin(wybrane_bu)]
-    
-    # Dane z ubiegłego roku (LY)
     df_ly = df[df['Rok'] == (rok - 1)]
     df_ly_filtered = df_ly[df_ly['BU PwC'].isin(wybrane_bu)]
     
@@ -108,6 +127,24 @@ if uploaded_file is not None:
             res['Dynamika YoY (%)'] = (res['YTD ACT'] / res['YTD LY'].replace(0, np.nan) - 1) * 100
             
         return res.sort_values('YTD ACT', ascending=False)
+
+    def get_revenue_table(df_rev_local, df_rev_ly_local):
+        res_rev_local = calculate_ytd(df_rev_local, df_rev_ly_local, is_cost=False)
+        df_billed_local = df_rev_local[df_rev_local['Mapping P&L Line - level 2'].isin(billed_rev_lines)]
+        df_billed_ly_local = df_rev_ly_local[df_rev_ly_local['Mapping P&L Line - level 2'].isin(billed_rev_lines)]
+        res_billed_local = calculate_ytd(df_billed_local, df_billed_ly_local, is_cost=False)
+
+        if not res_rev_local.empty:
+            if not res_billed_local.empty:
+                res_rev_local['Billed Rev YTD ACT'] = res_billed_local['YTD ACT']
+            else:
+                res_rev_local['Billed Rev YTD ACT'] = 0
+            
+            res_rev_local['Billed Rev YTD ACT'] = res_rev_local['Billed Rev YTD ACT'].fillna(0)
+            res_rev_local['% Billed/Total'] = (res_rev_local['Billed Rev YTD ACT'] / res_rev_local['YTD ACT'].replace(0, np.nan)) * 100
+            res_rev_local['% Billed/Total'] = res_rev_local['% Billed/Total'].fillna(0)
+            
+        return res_rev_local, df_billed_local, df_billed_ly_local
 
     def calculate_margin(data_rok, data_ly):
         df_costs = data_rok[data_rok['Mapping P&L Line - level 1'].isin(cost_lines)]
@@ -134,7 +171,7 @@ if uploaded_file is not None:
         
         return margin
 
-    def get_monthly_trend(data_subset, data_ly_subset, is_cost=False, max_month=12, force_non_cumulative=False):
+    def get_monthly_trend(data_subset, data_ly_subset, is_cost=False, max_month=12, force_non_cumulative=False, data_billed=None):
         df_trend = data_subset[data_subset['Miesiąc'] <= max_month]
         df_trend_ly = data_ly_subset[data_ly_subset['Miesiąc'] <= max_month]
         
@@ -152,8 +189,18 @@ if uploaded_file is not None:
         trend['LY'] = trend_ly
         trend['LY'] = trend['LY'].fillna(0)
         
+        if data_billed is not None:
+            df_trend_billed = data_billed[data_billed['Miesiąc'] <= max_month]
+            trend_billed = df_trend_billed.groupby('Miesiąc')['Sum of Wartość'].sum() if not df_trend_billed.empty else pd.Series()
+            trend['BILLED'] = trend_billed
+            trend['BILLED'] = trend['BILLED'].fillna(0)
+        
         trend = trend / 1e6 
-        trend = trend[['ACT', 'BGT', 'LY']]
+        
+        cols_to_keep = ['ACT', 'BGT', 'LY']
+        if 'BILLED' in trend.columns:
+            cols_to_keep.append('BILLED')
+        trend = trend[cols_to_keep]
         
         all_months = list(range(1, max_month + 1))
         trend = trend.reindex(all_months).fillna(0)
@@ -174,11 +221,25 @@ if uploaded_file is not None:
         color_act = '#2b5c8f'
         color_bgt = '#e28743'
         color_ly = '#a5b1c2'
+        color_billed = '#43a047' # Zielony dla Billed Revenue
 
-        if pokaz_yoy:
+        has_billed = 'BILLED' in trend_data.columns
+
+        if pokaz_yoy and has_billed:
+            width = 0.2
+            ax.bar(x - 1.5*width, trend_data['LY'], width, label='Zeszły Rok (LY)', color=color_ly)
+            ax.bar(x - 0.5*width, trend_data['ACT'], width, label='Wykonanie (ACT)', color=color_act)
+            ax.bar(x + 0.5*width, trend_data['BILLED'], width, label='Billed Rev. (ACT)', color=color_billed)
+            ax.bar(x + 1.5*width, trend_data['BGT'], width, label='Budżet (BGT)', color=color_bgt)
+        elif pokaz_yoy and not has_billed:
             width = 0.25
             ax.bar(x - width, trend_data['LY'], width, label='Zeszły Rok (LY)', color=color_ly)
             ax.bar(x, trend_data['ACT'], width, label='Wykonanie (ACT)', color=color_act)
+            ax.bar(x + width, trend_data['BGT'], width, label='Budżet (BGT)', color=color_bgt)
+        elif not pokaz_yoy and has_billed:
+            width = 0.25
+            ax.bar(x - width, trend_data['ACT'], width, label='Wykonanie (ACT)', color=color_act)
+            ax.bar(x, trend_data['BILLED'], width, label='Billed Rev. (ACT)', color=color_billed)
             ax.bar(x + width, trend_data['BGT'], width, label='Budżet (BGT)', color=color_bgt)
         else:
             width = 0.35
@@ -239,7 +300,7 @@ if uploaded_file is not None:
             
             df_rev = df_rok[df_rok['BU PwC'].isin(bu_list) & (df_rok['Mapping P&L Line - level 1'] == 'Total Revenue')]
             df_rev_ly = df_ly[df_ly['BU PwC'].isin(bu_list) & (df_ly['Mapping P&L Line - level 1'] == 'Total Revenue')]
-            res_rev = calculate_ytd(df_rev, df_rev_ly, is_cost=False)
+            res_rev, df_billed_pdf, df_billed_ly_pdf = get_revenue_table(df_rev, df_rev_ly)
             
             df_rok_bu = df_rok[df_rok['BU PwC'].isin(bu_list)]
             df_ly_bu = df_ly[df_ly['BU PwC'].isin(bu_list)]
@@ -262,16 +323,17 @@ if uploaded_file is not None:
                         pdf.savefig(fig_chart_c, bbox_inches='tight')
                         plt.close(fig_chart_c)
 
-            # TAB 2
+            # TAB 2 (Zmodyfikowane o Billed Rev)
             if not res_rev.empty:
-                df_pdf_r = format_df_for_pdf(res_rev[cols_std], format_std)
+                df_pdf_r = format_df_for_pdf(res_rev[cols_rev], format_rev)
                 fig_tr = plot_dataframe_to_fig(df_pdf_r, f"2. {title_prefix} - PRZYCHODY (YTD do m-ca {miesiac})")
                 pdf.savefig(fig_tr, bbox_inches='tight')
                 plt.close(fig_tr)
                 for bu in bu_list:
                     df_bu_rev = df_rev[df_rev['BU PwC'] == bu]
                     df_bu_rev_ly = df_rev_ly[df_rev_ly['BU PwC'] == bu]
-                    trend_rev = get_monthly_trend(df_bu_rev, df_bu_rev_ly, is_cost=False, max_month=miesiac)
+                    df_bu_billed = df_billed_pdf[df_billed_pdf['BU PwC'] == bu]
+                    trend_rev = get_monthly_trend(df_bu_rev, df_bu_rev_ly, is_cost=False, max_month=miesiac, data_billed=df_bu_billed)
                     if not trend_rev.empty and (trend_rev.sum().sum() != 0):
                         fig_chart_r = draw_side_by_side_bar_chart(trend_rev, f"PRZYCHODY: {bu}", is_cost=False, return_fig=True)
                         pdf.savefig(fig_chart_r, bbox_inches='tight')
@@ -285,23 +347,6 @@ if uploaded_file is not None:
                 plt.close(fig_tm)
 
         return pdf_buffer.getvalue()
-
-    # Formaty
-    if pokaz_yoy:
-        cols_std = ['YTD ACT', 'YTD BGT', '% Realizacji BGT', 'Odchylenie do BGT', 'YTD LY', 'Zmiana kwotowa YoY', 'Dynamika YoY (%)']
-        format_std = {'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'YTD LY': '{:,.0f}', 'Odchylenie do BGT': '{:,.0f}', 'Zmiana kwotowa YoY': '{:,.0f}', '% Realizacji BGT': '{:.1f}%', 'Dynamika YoY (%)': '{:.1f}%'}
-        cols_margin = ['Przychody YTD ACT', 'Koszty YTD ACT', 'Marża YTD ACT', 'Marża YTD BGT', 'Marża YTD LY', 'Marża % YTD ACT', 'Marża % YTD BGT', 'Marża % YTD LY', 'Odchylenie Marży do BGT', 'Zmiana Marży YoY']
-    else:
-        cols_std = ['YTD ACT', 'YTD BGT', '% Realizacji BGT', 'Odchylenie do BGT']
-        format_std = {'YTD ACT': '{:,.0f}', 'YTD BGT': '{:,.0f}', 'Odchylenie do BGT': '{:,.0f}', '% Realizacji BGT': '{:.1f}%'}
-        cols_margin = ['Przychody YTD ACT', 'Koszty YTD ACT', 'Marża YTD ACT', 'Marża YTD BGT', 'Marża % YTD ACT', 'Marża % YTD BGT', 'Odchylenie Marży do BGT']
-        
-    format_margin = {
-        'Przychody YTD ACT': '{:,.0f}', 'Koszty YTD ACT': '{:,.0f}',
-        'Marża YTD ACT': '{:,.0f}', 'Marża YTD BGT': '{:,.0f}', 'Marża YTD LY': '{:,.0f}',
-        'Marża % YTD ACT': '{:.1f}%', 'Marża % YTD BGT': '{:.1f}%', 'Marża % YTD LY': '{:.1f}%',
-        'Odchylenie Marży do BGT': '{:,.0f}', 'Zmiana Marży YoY': '{:,.0f}'
-    }
 
     # SEKCJA EKSPORTU PDF & ZIP
     st.sidebar.markdown("---")
@@ -385,31 +430,21 @@ if uploaded_file is not None:
             df_rev = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 1'] == 'Total Revenue']
             df_rev_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 1'] == 'Total Revenue']
             
-            res_rev = calculate_ytd(df_rev, df_rev_ly, is_cost=False)
-            style_r = res_rev[cols_std].style.format(format_std)
+            res_rev, df_billed, df_billed_ly = get_revenue_table(df_rev, df_rev_ly)
+            
+            style_r = res_rev[cols_rev].style.format(format_rev)
             if podswietl_delivery:
                 style_r = style_r.apply(highlight_delivery, axis=1)
             style_r = style_r.background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn')
             st.dataframe(style_r, use_container_width=True)
             
-            with st.expander("👀 Pokaż szczegóły: Billed Revenue"):
-                df_billed = df_rok_filtered[df_rok_filtered['Mapping P&L Line - level 2'].isin(billed_rev_lines)]
-                df_billed_ly = df_ly_filtered[df_ly_filtered['Mapping P&L Line - level 2'].isin(billed_rev_lines)]
-                res_billed = calculate_ytd(df_billed, df_billed_ly, is_cost=False)
-                if not res_billed.empty:
-                    style_b = res_billed[cols_std].style.format(format_std)
-                    if podswietl_delivery:
-                        style_b = style_b.apply(highlight_delivery, axis=1)
-                    style_b = style_b.background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn')
-                    st.dataframe(style_b, use_container_width=True)
-                else:
-                    st.info("Brak Billed Revenue w wybranych jednostkach.")
-            
             st.divider()
             for bu in wybrane_bu:
                 df_bu_rev = df_rev[df_rev['BU PwC'] == bu]
                 df_bu_rev_ly = df_rev_ly[df_rev_ly['BU PwC'] == bu]
-                trend_rev = get_monthly_trend(df_bu_rev, df_bu_rev_ly, is_cost=False, max_month=miesiac)
+                df_bu_billed = df_billed[df_billed['BU PwC'] == bu]
+                
+                trend_rev = get_monthly_trend(df_bu_rev, df_bu_rev_ly, is_cost=False, max_month=miesiac, data_billed=df_bu_billed)
                 if not trend_rev.empty and (trend_rev.sum().sum() != 0):
                     draw_side_by_side_bar_chart(trend_rev, title=f"PRZYCHODY: {bu}", is_cost=False)
         else:
@@ -442,7 +477,7 @@ if uploaded_file is not None:
         df_deliv_rev_ly = df_deliv_ly[df_deliv_ly['Mapping P&L Line - level 1'] == 'Total Revenue']
         
         c_res = calculate_ytd(df_deliv_costs, df_deliv_costs_ly, is_cost=True)
-        r_res = calculate_ytd(df_deliv_rev, df_deliv_rev_ly, is_cost=False)
+        r_res, df_deliv_billed, df_deliv_billed_ly = get_revenue_table(df_deliv_rev, df_deliv_rev_ly)
         
         col1, col2 = st.columns(2)
         with col1:
@@ -465,19 +500,12 @@ if uploaded_file is not None:
 
         with col2:
             st.success("PRZYCHODY (YTD)")
-            style_deliv_r = r_res[cols_std].style.format(format_std)
+            style_deliv_r = r_res[cols_rev].style.format(format_rev)
             if podswietl_delivery:
                 style_deliv_r = style_deliv_r.apply(highlight_delivery, axis=1)
             st.dataframe(style_deliv_r)
             
-            with st.expander("👀 Pokaż szczegóły: Billed Revenue"):
-                df_deliv_billed = df_deliv[df_deliv['Mapping P&L Line - level 2'].isin(billed_rev_lines)]
-                df_deliv_billed_ly = df_deliv_ly[df_deliv_ly['Mapping P&L Line - level 2'].isin(billed_rev_lines)]
-                res_deliv_billed = calculate_ytd(df_deliv_billed, df_deliv_billed_ly, is_cost=False)
-                if not res_deliv_billed.empty:
-                    st.dataframe(res_deliv_billed[cols_std].style.format(format_std).background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn'))
-            
-            trend_deliv_rev = get_monthly_trend(df_deliv_rev, df_deliv_rev_ly, is_cost=False, max_month=miesiac)
+            trend_deliv_rev = get_monthly_trend(df_deliv_rev, df_deliv_rev_ly, is_cost=False, max_month=miesiac, data_billed=df_deliv_billed)
             if not trend_deliv_rev.empty:
                  draw_side_by_side_bar_chart(trend_deliv_rev, title="PRZYCHODY: Delivery (Skonsolidowane)", is_cost=False)
                  
@@ -530,7 +558,7 @@ if uploaded_file is not None:
         df_comm_rev_ly = df_comm_ly[df_comm_ly['Mapping P&L Line - level 1'] == 'Total Revenue']
         
         c_res_comm = calculate_ytd(df_comm_costs, df_comm_costs_ly, is_cost=True)
-        r_res_comm = calculate_ytd(df_comm_rev, df_comm_rev_ly, is_cost=False)
+        r_res_comm, df_comm_billed, df_comm_billed_ly = get_revenue_table(df_comm_rev, df_comm_rev_ly)
         
         col1_comm, col2_comm = st.columns(2)
         with col1_comm:
@@ -552,16 +580,9 @@ if uploaded_file is not None:
         with col2_comm:
             st.success("PRZYCHODY (YTD)")
             if not r_res_comm.empty:
-                st.dataframe(r_res_comm[cols_std].style.format(format_std))
-                
-            with st.expander("👀 Pokaż szczegóły: Billed Revenue"):
-                df_comm_billed = df_comm[df_comm['Mapping P&L Line - level 2'].isin(billed_rev_lines)]
-                df_comm_billed_ly = df_comm_ly[df_comm_ly['Mapping P&L Line - level 2'].isin(billed_rev_lines)]
-                res_comm_billed = calculate_ytd(df_comm_billed, df_comm_billed_ly, is_cost=False)
-                if not res_comm_billed.empty:
-                    st.dataframe(res_comm_billed[cols_std].style.format(format_std).background_gradient(subset=['Odchylenie do BGT'], cmap='RdYlGn'))
+                st.dataframe(r_res_comm[cols_rev].style.format(format_rev))
             
-            trend_comm_rev = get_monthly_trend(df_comm_rev, df_comm_rev_ly, is_cost=False, max_month=miesiac)
+            trend_comm_rev = get_monthly_trend(df_comm_rev, df_comm_rev_ly, is_cost=False, max_month=miesiac, data_billed=df_comm_billed)
             if not trend_comm_rev.empty:
                  draw_side_by_side_bar_chart(trend_comm_rev, title="PRZYCHODY: Całe Communications", is_cost=False)
                  
